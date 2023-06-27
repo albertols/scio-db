@@ -1,0 +1,104 @@
+name: deploy_flex_template
+on:
+  push:
+    branches:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      ENV_NAME:
+        required: true
+        description: "Environment (dev/uat/prd)"
+      INPUT_TYPE:
+        required: true
+        description: "File type (avro)"
+
+env:
+  ARTIFACTORY_NAMESPACE: "com/db/myproject"
+  ARTIFACTORY_HOST: "the_artifactory.com"
+  ARTIFACTORY_BASE_URL: "https://the_artifactory.com"
+  JAVA_VERSION: "11.0.12"
+  JAVA_IMAGE: the_artifactory..com/dkr-public-local/dkr-gcr/distroless/java:11
+  COMMIT_SHA: ${{ github.sha }}
+  ENV_NAME: "dev"
+  INPUT_TYPE: "avro"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  SbtBuild:
+    name: Deploy
+    runs-on: DBGDBC
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set env based on the ENV type dev/uat/prod
+        id: setEnvVarsBasedOnEnvName
+        run: |
+          if [[ "$ENV_NAME" == "dev" ]]; then
+              echo "PROJECT_ID=my-project-id" >> $GITHUB_ENV
+              echo "SERVICE_ACCOUNT_KEY=${{ secrets.GOOGLE_CREDENTIALS_DBC_DEV }}" >> $GITHUB_ENV
+          fi
+          echo "INPUT_TYPE=$INPUT_TYPE"
+          echo "ENV_NAME=$ENV_NAME"
+          echo "PROJECT_ID=${{ env.PROJECT_ID }}"
+
+      - name: Set env INPUT_TYPE, CONTAINER_IMAGE_NAME and DF_TEMPLATE_PATH vars
+        id: setEnvVarsBasedOnFileType
+        run: |
+          replaceSlashWithDash(){
+              echo "$1" | sed -r 's/\//-/g'
+          }
+          
+          echo "RELEASE_VERSION=$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          
+          if [[ "${{ env.INPUT_TYPE }}" == "avro" ]]; then
+              echo "CONTAINER_IMAGE_NAME=pe-avro-producer-producer-template" >> $GITHUB_ENV
+              echo "DF_TEMPLATE_PATH=gs://db-$ENV_NAME-europe-west3-gcs-id-MYPROJECT-es-dataflow-templates/avro/pe-avro-producer-producer-template.json" >> $GITHUB_ENV
+          fi
+          echo "CONTAINER_IMAGE_NAME=${{ env.CONTAINER_IMAGE_NAME }}"
+          echo "DF_TEMPLATE_PATH=${{ env.DF_TEMPLATE_PATH }}"
+
+      - name: 'Authenticate to Google Cloud- DEV'
+        uses: 'google-github-actions/auth@v1'
+        id: dev-auth
+        if: startsWith(env.PROJECT_ID, 'db-dev')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['dev/lz-secrets'] }}
+
+      - name: 'Authenticate to Google Cloud- UAT'
+        uses: 'google-github-actions/auth@v1'
+        id: uat-auth
+        if: startsWith(env.PROJECT_ID, 'db-uat')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['uat/lz-secrets'] }}
+
+      - name: 'Authenticate to Google Cloud- PRD'
+        uses: 'google-github-actions/auth@v1'
+        id: prd-auth
+        if: startsWith(env.PROJECT_ID, 'db-prd')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/lz-secrets'] }}
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+
+      - name: Check gcloud info
+        run: gcloud info
+
+      - name: Build flex-template for env:$ENV_NAME
+        run: |-
+          echo "Logging into docker"
+          echo "Creating Data flow Template : ${{ env.CONTAINER_IMAGE_NAME }}"
+
+          gcloud dataflow flex-template build ${{ env.DF_TEMPLATE_PATH }} \
+                --image="${{ env.ARTIFACTORY_HOST }}/dkr-public-local/${{ env.ARTIFACTORY_NAMESPACE }}/${{ env.CONTAINER_IMAGE_NAME }}:${{ env.RELEASE_VERSION }}" \
+                --image-repository-username-secret-id="projects/${{ env.PROJECT_ID }}/secrets/ARTIFACTORY_RELEASER_USERNAME" \
+                --image-repository-password-secret-id="projects/${{ env.PROJECT_ID }}/secrets/ARTIFACTORY_RELEASER_PASSWORD" \
+                --image-repository-cert-path="gs://db-$ENV_NAME-europe-west3-gcs-id-MYPROJECT-es-dataflow-templates/image_registry.crt" \
+                --sdk-language=JAVA

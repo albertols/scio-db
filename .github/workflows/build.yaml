@@ -1,0 +1,204 @@
+name: build_in_docker
+on:
+  push:
+    branches:
+      - '*'
+  workflow_dispatch:
+
+env:
+  ARTIFACTORY_NAMESPACE: "com/db/myproject"
+  ARTIFACTORY_HOSTNAME: "the_artifactory..com"
+  ARTIFACTORY_BASE_URL: "https://the_artifsactory.com"
+  JAVA_VERSION: 11.0.17
+  JAVA_VERSION_SEM: 11.0.17
+  ENV_NAME: "dev"
+  FILE_TYPE: "avro"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  SbtBuild:
+    name: Build
+    runs-on: DBGDBC
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set env based on the ENV type dev/uat/prod
+        id: setEnvVarsBasedOnEnvName
+        run: |
+          if [[ "$ENV_NAME" == "dev" ]]; then
+              echo "PROJECT_ID=my-project-id" >> $GITHUB_ENV
+              echo "SERVICE_ACCOUNT_KEY=${{ secrets.GOOGLE_CREDENTIALS_DBC_DEV }}" >> $GITHUB_ENV
+          fi
+          echo "PROJECT_ID=${{ env.PROJECT_ID }}"
+
+      - name: Set env FILE_TYPE, CONTAINER_IMAGE_NAME and FLEX_TEMPLATE_JAVA_MAIN_CLASS vars
+        id: setEnvVarsBasedOnFileType
+        run: |
+          if [[ "$FILE_TYPE" == "json" ]]; then
+              echo "FILE_TYPE=json" >> $GITHUB_ENV
+              echo "CONTAINER_IMAGE_NAME=pe-mainframe-replication-template" >> $GITHUB_ENV
+              echo "FLEX_TEMPLATE_JAVA_MAIN_CLASS=com.db.myproject.MainframeReplication" >> $GITHUB_ENV
+          fi
+
+          if [[ "$FILE_TYPE" == "txt" ]]; then
+              echo "FILE_TYPE=csv" >> $GITHUB_ENV
+              echo "CONTAINER_IMAGE_NAME=pe-txt-wordcount-template" >> $GITHUB_ENV
+              echo "FLEX_TEMPLATE_JAVA_MAIN_CLASS=com.db.myproject.WordCount" >> $GITHUB_ENV
+          fi
+
+          if [[ "$FILE_TYPE" == "avro" ]]; then
+              echo "FILE_TYPE=avro" >> $GITHUB_ENV
+              echo "CONTAINER_IMAGE_NAME=pe-avro-producer-producer-template" >> $GITHUB_ENV
+              echo "FLEX_TEMPLATE_JAVA_MAIN_CLASS=com.db.myproject.avro.MyAvroRecordProducer" >> $GITHUB_ENV
+          fi
+
+          replaceSlashWithDash(){
+            echo "$1" | sed -r 's/\//-/g'
+          }
+
+          echo "RELEASE_VERSION=$(replaceSlashWithDash "${GITHUB_REF#refs/*/}")-$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - id: preparation
+        name: Prepare environment
+        shell: bash
+        env:
+          PROJECT_ID: "${{ env.PROJECT_ID }}"
+        run: |
+          set -e
+          if [[ ${PROJECT_ID} == db-prd* ]]; then
+            echo 'Setting PRD project'
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_PRD }}" >> $GITHUB_OUTPUT
+          elif [[ ${PROJECT_ID} == db-uat* ]]; then
+            echo 'Setting UAT project'
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_UAT }}" >> $GITHUB_OUTPUT
+          elif [[ ${PROJECT_ID} == db-dev* ]]; then
+            echo 'Setting DEV project'
+            echo "GOOGLE_PROJECT_DBC=${{ secrets.GOOGLE_PROJECT_DBC_DEV }}" >> $GITHUB_OUTPUT
+          else
+            echo 'Unable to define project.'
+            exit 1
+          fi
+
+      - name: 'Authenticate to Google Cloud- DEV'
+        uses: 'google-github-actions/auth@v1'
+        id: dev-auth
+        if: startsWith(env.PROJECT_ID, 'db-dev')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['dev/lz-secrets'] }}
+
+      - name: 'Authenticate to Google Cloud- UAT'
+        uses: 'google-github-actions/auth@v1'
+        id: uat-auth
+        if: startsWith(env.PROJECT_ID, 'db-uat')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['uat/lz-secrets'] }}
+
+      - name: 'Authenticate to Google Cloud- PRD'
+        uses: 'google-github-actions/auth@v1'
+        id: prd-auth
+        if: startsWith(env.PROJECT_ID, 'db-prd')
+        with:
+          workload_identity_provider: ${{ secrets.DEFAULT_WIF_PROVIDER }}
+          service_account: ${{ fromJSON(secrets.PIPELINE_SERVICE_ACCOUNT_EMAILS)['prd/lz-secrets'] }}
+
+      - id: get-secrets
+        name: Get secret
+        uses: google-github-actions/get-secretmanager-secrets@v1
+        with:
+          secrets: |-
+            artifactory_developer_username:${{ steps.preparation.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_USERNAME
+            artifactory_developer_password:${{ steps.preparation.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_DEVELOPER_PASSWORD
+            artifactory_release_username:${{ steps.preparation.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_USERNAME
+            artifactory_release_password:${{ steps.preparation.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_RELEASER_PASSWORD
+            artifactory_key_releaser:${{ steps.preparation.outputs.GOOGLE_PROJECT_DBC }}/ARTIFACTORY_KEY_RELEASER
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+
+      - name: Check gcloud info
+        run: gcloud info
+
+      - name: Pre-load OpenJDK
+        env:
+          ARTIFACTORY_KEY: ${{ steps.get-secrets.outputs.artifactory_release_username }}:${{ steps.get-secrets.outputs.artifactory_release_password }}
+        run: |
+          if [ ! -d "$RUNNER_TOOL_CACHE/Java_jdkfile_db-openjdk/$JAVA_VERSION_SEM/x64/" ]; then
+            echo "Downloading DB Java $JAVA_VERSION from Artifactory"
+            curl --noproxy '*' -k -H --insecure -u ${ARTIFACTORY_KEY} -k "https://$ARTIFACTORY_HOSTNAME/artifactory/mvn-dist-db/org/openjdk/openjdk/$JAVA_VERSION/openjdk-$JAVA_VERSION-db-linux-x86_64.tar.gz" -o $RUNNER_TEMP/java.tar.gz
+          else
+            # setup-java fails when jdkFile does not exit...
+            echo "DB Java: using tool cache version"
+            touch $RUNNER_TEMP/java.tar.gz
+          fi
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          overwrite-settings: false
+          server-username: ${{ steps.get-secrets.outputs.artifactory_release_username }}
+          server-password: ${{ steps.get-secrets.outputs.artifactory_key_releaser }}
+          server-id: "central"
+          distribution: 'jdkfile'
+          jdkFile: ${{ runner.temp }}/java.tar.gz
+          java-version: ${{ env.JAVA_VERSION_SEM }}
+          java-package: 'db-openjdk'
+          architecture: x64
+
+      - name: Setup SBT
+        env:
+          SBT_VERSION: 1.8.2
+          ARTIFACTORY_USERNAME: ${{ steps.get-secrets.outputs.artifactory_developer_username }}
+          ARTIFACTORY_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_developer_password }}
+        run: |
+          mkdir sbt
+          curl -kL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" -o "sbt-${SBT_VERSION}.tgz"
+          tar xfz sbt-${SBT_VERSION}.tgz
+          echo "$(pwd)/sbt/bin" >> $GITHUB_PATH
+          $(pwd)/sbt/bin/sbt --version
+          cp .github/.sbt/* ~/.sbt/
+          echo "realm=Artifactory Realm" >> ~/.sbt/.credentials
+          echo "host=${{ env.ARTIFACTORY_HOSTNAME }}" >> ~/.sbt/.credentials
+          echo "user=${{ env.ARTIFACTORY_USERNAME }}" >> ~/.sbt/.credentials
+          echo "password=${{ env.ARTIFACTORY_PASSWORD }}" >> ~/.sbt/.credentials
+          mkdir -p ~/.sbt/1.0/plugins
+          echo "credentials += Credentials(Path.userHome / \".sbt\" / \".credentials\")" >> ~/.sbt/1.0/plugins/credentials.sbt
+
+      - name: Run SBT PACK
+        run: |-
+          export no_proxy="${no_proxy},the_artifactory..com"
+          export NO_PROXY="${NO_PROXY},the_artifactory..com"
+          export HTTPS_PROXY=""
+          export https_proxy=""
+          export HTTP_PROXY=""
+          export http_proxy=""
+          sbt -v -Dsbt.insecureprotocol=true -Dsbt.override.build.repos=true -Dsbt.color=false -Dbigquery.project=${PROJECT_ID} -Dbigquery.types.debug=true clean pack
+
+      - name: Build Image for env:$ENV_NAME
+        env:
+          ARTIFACTORY_RELEASER_USERNAME: ${{ steps.get-secrets.outputs.artifactory_release_username }}
+          ARTIFACTORY_RELEASER_PASSWORD: ${{ steps.get-secrets.outputs.artifactory_release_password }}
+          DATAFLOW_JOB_JAR_WITH_DEPENDENCIES_PATH: "target/pack/lib"
+        run: |-
+          echo "Logging into docker"
+          echo ${ARTIFACTORY_RELEASER_PASSWORD} | docker login --password-stdin --username ${ARTIFACTORY_RELEASER_USERNAME}  ${ARTIFACTORY_BASE_URL}/
+
+          echo "Triggering docker build"
+          DOCKER_BUILDKIT=1 \
+          docker build -t ${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${{ env.CONTAINER_IMAGE_NAME }}:${{ env.RELEASE_VERSION }} \
+          --cache-from ${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${{ env.CONTAINER_IMAGE_NAME }}:latest \
+          --build-arg ENV_NAME=$ENV_NAME \
+          --build-arg FLEX_TEMPLATE_JAVA_MAIN_CLASS_ARG=${{ env.FLEX_TEMPLATE_JAVA_MAIN_CLASS }} \
+          --build-arg DATAFLOW_JOB_JAR_WITH_DEPENDENCIES_PATH_ARG=$DATAFLOW_JOB_JAR_WITH_DEPENDENCIES_PATH \
+          .
+
+          echo "Show docker images"
+          docker images
+
+          echo "Push docker image to: ${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${{ env.CONTAINER_IMAGE_NAME }}:${{ env.RELEASE_VERSION }}"
+          docker push ${ARTIFACTORY_HOSTNAME}/dkr-public-local/${ARTIFACTORY_NAMESPACE}/${{ env.CONTAINER_IMAGE_NAME }}:${{ env.RELEASE_VERSION }}

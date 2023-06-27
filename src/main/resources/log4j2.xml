@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Properties>
+        <Property name="CLR">{FATAL=bright red, ERROR=red, WARN=bright yellow, INFO=green, DEBUG=white, TRACE=black}</Property>
+        <Property name="LOG_PATTERN_2" >
+            %highlight{%d{yyyy/MM/dd HH:mm:ss.SSS} [%thread] %-5level} %cyan{%logger{36}}: %magenta{'%M'} %msg%n
+        </Property>
+    </Properties>
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+<!--            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>-->
+            <PatternLayout pattern="${LOG_PATTERN_2}"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Logger name="org.apache.kafka.clients.consumer.internals.SubscriptionState" level="WARN"/>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>
