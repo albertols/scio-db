@@ -1,4 +1,4 @@
-package com.db.pwcclakees.mediation.model
+package com.db.myproject.async.model
 
 import com.google.gson.Gson
 import io.circe.generic.JsonCodec

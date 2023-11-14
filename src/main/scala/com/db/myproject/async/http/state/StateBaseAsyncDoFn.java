@@ -1,4 +1,4 @@
-package com.db.pwcclakees.mediation.http.state;
+package com.db.myproject.async.http.state;
 
 import com.spotify.scio.transforms.DoFnWithResource;
 import com.spotify.scio.transforms.FutureHandlers;
@@ -22,15 +22,19 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
         extends DoFnWithResource<InputT, OutputT, ResourceT>
         implements FutureHandlers.Base<FutureT, OutputT> {
     private static final Logger LOG = LoggerFactory.getLogger(StateBaseAsyncDoFn.class);
+    private final ConcurrentMap<UUID, FutureT> futures = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<Result> results = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Throwable> errors = new ConcurrentLinkedQueue<>();
+    @TimerId("ttl")
+    private final TimerSpec ttlSpec = TimerSpecs.timer(TimeDomain.PROCESSING_TIME);
+
+    @StateId("buffer")
+    private final StateSpec<MapState<InputT, OutputT>> bufferedEvents = StateSpecs.map();
 
     /**
      * Process an element asynchronously.
      */
     public abstract FutureT processElement(InputT input);
-
-    private final ConcurrentMap<UUID, FutureT> futures = new ConcurrentHashMap<>();
-    private final ConcurrentLinkedQueue<Result> results = new ConcurrentLinkedQueue<>();
-    private final ConcurrentLinkedQueue<Throwable> errors = new ConcurrentLinkedQueue<>();
 
     @DoFn.StartBundle
     public void startBundle(StartBundleContext context) {
@@ -57,31 +61,19 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
         flush(context);
     }
 
-    @TimerId("timer")
-    private final TimerSpec timerSpec = TimerSpecs.timer(TimeDomain.PROCESSING_TIME);
-
-    @StateId("counter")
-    private final StateSpec<ValueState<Integer>> counter = StateSpecs.value();
-
-    @StateId("buffer")
-    private final StateSpec<MapState<InputT, OutputT>> bufferedEvents = StateSpecs.map();
-
     @ProcessElement
     public void processElement(
             @Element InputT element,
-            @TimerId("timer") Timer timer,
-            @StateId("counter") ValueState<Integer> counter,
+            @TimerId("ttl") Timer ttl,
             @StateId("buffer") MapState<InputT, OutputT> buffer,
             @Timestamp Instant timestamp,
             OutputReceiver<OutputT> out,
             BoundedWindow window) {
         flush(out);
-        settingElementTimer(timer, counter);
+        settingElementTTLTimer(buffer, ttl);
 
-        if (!alreadySent(buffer, element))
+        if (!alreadySent(buffer, element, ttl))
             try {
-                Integer count = counter.read();
-                //counter.write(count + 1);
                 final UUID uuid = UUID.randomUUID();
                 final FutureT future = processElement(element);
                 futures.put(uuid, handleOutput(future, element, buffer, uuid, timestamp, window));
@@ -91,9 +83,9 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
             }
     }
 
-    protected abstract boolean alreadySent(@StateId("buffer") MapState<InputT, OutputT> buffer, InputT element);
+    protected abstract boolean alreadySent(@StateId("buffer") MapState<InputT, OutputT> buffer, InputT element, @TimerId("ttl") Timer ttl);
 
-    protected abstract void settingElementTimer(@TimerId("timer") Timer timer, @StateId("counter") ValueState<Integer> counter);
+    protected abstract void settingElementTTLTimer(@StateId("buffer") MapState<InputT, OutputT> buffer, @TimerId("ttl") Timer ttl);
 
     private FutureT handleOutput(FutureT future, InputT input, @StateId("buffer") MapState<InputT, OutputT> buffer, UUID key, Instant timestamp, BoundedWindow window) {
         return addCallback(
@@ -147,11 +139,23 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
         }
     }
 
+    @OnTimer("ttl")
+    public void onTtl(
+            OnTimerContext c,
+            @StateId("buffer") MapState<InputT, OutputT> buffer) {
+        long count = java.util.stream.StreamSupport.stream(
+                        java.util.Spliterators.spliteratorUnknownSize(
+                                buffer.entries().read().iterator(), java.util.Spliterator.ORDERED), false)
+                .count();
+        LOG.info("****  Deleting, buffer_size={} **** ", count);
+        buffer.clear();
+    }
+
     private class Result {
-        private OutputT output;
-        private UUID futureUuid;
-        private Instant timestamp;
-        private BoundedWindow window;
+        private final OutputT output;
+        private final UUID futureUuid;
+        private final Instant timestamp;
+        private final BoundedWindow window;
 
         Result(OutputT output, UUID futureUuid, Instant timestamp, BoundedWindow window) {
             this.output = output;
@@ -160,24 +164,4 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
             this.window = window;
         }
     }
-
-
-    @OnTimer("timer")
-    public void onTimer(
-            OnTimerContext c,
-            @StateId("counter") ValueState<Integer> counter,
-            @StateId("buffer") MapState<InputT, OutputT> buffer) {
-        long count = java.util.stream.StreamSupport.stream(
-                        java.util.Spliterators.spliteratorUnknownSize(
-                                buffer.entries().read().iterator(), java.util.Spliterator.ORDERED), false)
-                .count();
-        LOG.info("****  Deleting, old_ber_size=%s **** ", count);
-        buffer.clear();
-        counter.clear();
-    }
 }
-
-
-
-
-

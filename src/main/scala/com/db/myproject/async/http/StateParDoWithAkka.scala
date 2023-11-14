@@ -1,8 +1,8 @@
-package com.db.pwcclakees.mediation.http
+package com.db.myproject.async.http
 
-import com.db.pwcclakees.mediation.http.clients.AkkaHttpClient
-import com.db.pwcclakees.mediation.model.BusinessEvent.BusinessEventCirce
-import com.db.pwcclakees.mediation.nhub.model.TargetDevice
+import com.db.myproject.async.http.clients.AkkaHttpClient
+import com.db.myproject.async.model.BusinessEvent.BusinessEventCirce
+import com.db.myproject.async.nhub.model.TargetDevice
 import org.apache.beam.sdk.state._
 import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.transforms.DoFn.{OnTimer, ProcessElement, StateId, TimerId}

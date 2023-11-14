@@ -1,4 +1,4 @@
-package com.db.pwcclakees.mediation.http.clients
+package com.db.myproject.async.http.clients
 
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -7,11 +7,11 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
-import com.db.pwcclakees.mediation.SCIOAsyncService.mediationConfig
-import com.db.pwcclakees.mediation.model.BusinessEvent.BusinessEventCirce
-import com.db.pwcclakees.mediation.nhub.RequestFactory.{getDeviceRequest, getPushRequest}
-import com.db.pwcclakees.mediation.nhub.model.HttpResponse.HttpResponse
-import com.db.pwcclakees.mediation.nhub.model.TargetDevice
+import com.db.myproject.async.SCIOAsyncService.mediationConfig
+import com.db.myproject.async.model.BusinessEvent.BusinessEventCirce
+import com.db.myproject.async.nhub.RequestFactory.{getDeviceRequest, getPushRequest}
+import com.db.myproject.async.nhub.model.HttpResponse.HttpResponse
+import com.db.myproject.async.nhub.model.TargetDevice
 import org.apache.beam.sdk.values.KV
 import org.slf4j.{Logger, LoggerFactory}
 

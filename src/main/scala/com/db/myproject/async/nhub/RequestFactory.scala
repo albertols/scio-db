@@ -1,8 +1,8 @@
-package com.db.pwcclakees.mediation.nhub
+package com.db.myproject.async.nhub
 
-import com.db.pwcclakees.mediation.SCIOAsyncService.mediationConfig
-import com.db.pwcclakees.mediation.model.BusinessEvent.BusinessEventCirce
-import com.db.pwcclakees.mediation.nhub.model.{DeviceRequest, PushRequest}
+import com.db.myproject.async.SCIOAsyncService.mediationConfig
+import com.db.myproject.async.model.BusinessEvent.BusinessEventCirce
+import com.db.myproject.async.nhub.model.{DeviceRequest, PushRequest}
 
 import scala.collection.mutable.LinkedHashMap
 
