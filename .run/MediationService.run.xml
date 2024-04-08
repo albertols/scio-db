@@ -1,0 +1,18 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="MediationService" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.db.myproject.mediation.MediationService" />
+    <module name="scio-db" />
+    <option name="PROGRAM_PARAMETERS" value="--project=mypro --runner=DirectRunner" />
+    <shortenClasspath name="ARGS_FILE" />
+    <option name="VM_PARAMETERS" value="-Dlogback.configurationFile=src/main/resources/local_logback.xml" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="com.db.myproject.mediation.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
