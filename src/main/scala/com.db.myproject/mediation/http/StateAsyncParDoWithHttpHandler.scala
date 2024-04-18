@@ -1,14 +1,21 @@
 package com.db.myproject.mediation.http
 
 import com.db.myproject.mediation.MediationService.INITIAL_LOAD_PREFIX
-import com.db.myproject.mediation.avro.MyEventRecordUtils.{getIdempotentNotificationKey, newEventRecordWithRetryIncrement}
+import com.db.myproject.mediation.avro.MyEventRecordUtils.{
+  getIdempotentNotificationKey,
+  newEventRecordWithRetryIncrement
+}
 import com.db.myproject.mediation.configs.MediationConfig
 import com.db.myproject.mediation.http.StateAndTimerType.{InputBer, KVInputStringAndBer, KVOutputBerAndHttpResponse}
 import com.db.myproject.mediation.http.clients.zio.ZioHttpClient
 import com.db.myproject.mediation.http.clients.AbstractHttpClient
 import com.db.myproject.mediation.http.clients.akka.AkkaHttpClient
 import com.db.myproject.mediation.http.state.StateScalaAsyncDoFn
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.{NHUBResultEnum, emptyNotificationResponse, koNotificationResponse}
+import com.db.myproject.mediation.nhub.model.MyHttpResponse.{
+  emptyNotificationResponse,
+  koNotificationResponse,
+  NHUBResultEnum
+}
 import com.spotify.scio.transforms.DoFnWithResource.ResourceType
 import org.apache.beam.sdk.state.{BagState, Timer}
 import org.apache.beam.sdk.transforms.DoFn
@@ -23,14 +30,15 @@ import scala.util.{Failure, Success, Try}
 
 /**
  * @param mediationConfig
- * @param applyInitialLoad, interim flag for testing
+ * @param applyInitialLoad,
+ *   interim flag for testing
  */
 class StateAsyncParDoWithHttpHandler(mediationConfig: MediationConfig, applyInitialLoad: Boolean)
     extends StateScalaAsyncDoFn[
       StateAndTimerType.KVInputStringAndBer,
       StateAndTimerType.KVOutputBerAndHttpResponse,
       AbstractHttpClient
-    ]  {
+    ] {
   val log: Logger = LoggerFactory getLogger getClass.getName
   val MAX_RETRIES = 3
   val BACKOFF_SECONDS = 10
@@ -61,7 +69,9 @@ class StateAsyncParDoWithHttpHandler(mediationConfig: MediationConfig, applyInit
         Future(KV.of(input.getValue, koNotificationResponse(s"NOTIFICATION_ERROR: ${ex}")))
     }
 
-  def sendPushWithRetryZio(record: InputBer)(implicit zioRuntime: Runtime[Any]) = {
+  def sendPushWithRetryZio(
+    record: InputBer
+  )(implicit zioRuntime: Runtime[Any]): StateAndTimerType.FutureKVOutputBerAndHttpResponse = {
     import zio._
     lazy val futureRetriableBer = ZIO
       .attempt {
@@ -69,7 +79,9 @@ class StateAsyncParDoWithHttpHandler(mediationConfig: MediationConfig, applyInit
       }
       .retry(Schedule.fixed(BACKOFF_SECONDS.second) && Schedule.recurs(MAX_RETRIES))
       .onError(cause =>
-        ZIO.succeed(log.error(s"[exhausted_notification=${record.getEvent.getTransactionId}] Retried error:${cause}", cause))
+        ZIO.succeed(
+          log.error(s"[exhausted_notification=${record.getEvent.getTransactionId}] Retried error:${cause}", cause)
+        )
       )
 
     Unsafe.unsafe { implicit unsafe =>

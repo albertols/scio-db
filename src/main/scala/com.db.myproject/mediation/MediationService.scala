@@ -35,12 +35,12 @@ import pureconfig.generic.auto._
 import scala.reflect.ClassTag
 
 /**
- *
  */
 object MediationService {
   implicit val ct: ClassTag[MyEventRecord] = ClassTag(classOf[MyEventRecord])
   implicit val configReader = pureconfig.ConfigReader[MediationConfig]
-  lazy val defaultMediationConfig: MediationConfig = readConfigFromEnv(envEnum, sourceConfigEnum, Some(defaultConfigPath))
+  lazy val defaultMediationConfig: MediationConfig =
+    readConfigFromEnv(envEnum, sourceConfigEnum, Some(defaultConfigPath))
   implicit lazy val mediationConfig: MediationConfig = envEnum match {
     case PureConfigEnvEnum.test | PureConfigEnvEnum.local => defaultMediationConfig
     case _ =>
@@ -60,11 +60,12 @@ object MediationService {
   /* vars for defaultConfig (set up also by MediationServiceSpec) */
   var envEnum = EnumUtils.matchEnum("local", PureConfigEnvEnum).get
   var sourceConfigEnum = PureConfigSourceEnum.RESOURCES
-  val defaultConfigPath = "mediation/application.conf"
+  var defaultConfigPath = "mediation/application.conf"
 
   /* common HTTP Client config */
   implicit lazy val url = mediationConfig.mediation.endpoint.fullUrl
   implicit lazy val domain = mediationConfig.mediation.endpoint.url
+  implicit lazy val akkaConfig = mediationConfig.mediation.akka.get
 
   def main(cmdlineArgs: Array[String]): Unit = {
     try {
@@ -76,71 +77,64 @@ object MediationService {
       log.info(s"SCIO argsTap=$args")
       this.envEnum = EnumUtils.matchEnum(args.getOrElse("env", "local"), PureConfigEnvEnum).get
       val initialLoad: Boolean = args.getOrElse("initial-load", "false").toBoolean
-      val pubsubAvroAnalytics: String = args.getOrElse("pubsub-avro-analytics", mediationConfig.mediation.pubsubAvroAnalytics)
+      val pubsubAvroAnalytics: String =
+        args.getOrElse("pubsub-avro-analytics", mediationConfig.mediation.pubsubAvroAnalytics)
       val pubSubAvro: String = args.getOrElse("pubsub-avro", mediationConfig.mediation.pubsubAvro)
-      val streamingWindow: Long = args.getOrElse("stream-window", mediationConfig.mediation.berWindow).toLong // not used
-      val windowType: String = args.getOrElse("window-type", "global")  // not used
+      // val streamingWindow: Long = args.getOrElse("stream-window", mediationConfig.mediation.berWindow).toLong
+      // val windowType: String = args.getOrElse("window-type", "global")
       log.info(s"mediationConfig=$mediationConfig")
 
-      // 2) Loading historical GCS (result from YOUR_ENDPOINT, e.g: last 7 days)
-      val optionalOldBers = if (initialLoad) {
-        getOldAvrosFromGCS(
-          s"gs://${mediationConfig.gcsBucket}/${mediationConfig.mediation.gcsHistoricalRelativePath}/",
-          mediationConfig.mediation.initialLoadBersDays,
-          sc
-        )
-      } else None
+      // 2) Loading "historical" notifications from GCS (result from YOUR_ENDPOINT, e.g: last 7 days)
+      val optionalOldBers =
+        if (initialLoad)
+          getOldAvrosFromGCS(
+            s"gs://${mediationConfig.gcsBucket}/${mediationConfig.mediation.gcsHistoricalRelativePath}/",
+            mediationConfig.mediation.initialLoadBersDays,
+            sc
+          )
+        else None
 
-      // 3) new historical avro notifications
-      val avroBers =
-        PubSubConsumer.readGenericAvroScio[MyEventRecord](pubSubAvro, PubsubIO.ReadParam(PubsubIO.Subscription))
+      // 3) new avro "fresh" notifications
+      val avroBers = PubSubConsumer.readGenericAvroScio[MyEventRecord](pubSubAvro, PubsubIO.ReadParam(PubsubIO.Subscription))
 
       // 4) duplicate prevention
-      val allDistinctKoAndNotSentBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = if (optionalOldBers.isDefined) {
-        log.info(s"expiringHistoricalTime=$expiringHistoricalTime")
-        val oldGcs = optionalOldBers.get
-        oldGcs.count.map(oldGcsCount => log.info(s"oldGcsCount=$oldGcsCount"))
-        oldGcs.map { oldBer =>
-          //log.debug(s"GCS_BER=$oldBer")
+      val allDistinctKoAndNotSentBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) =
+        if (optionalOldBers.isDefined) {
+          log.info(s"expiringHistoricalTime=$expiringHistoricalTime")
+          val oldGcs = optionalOldBers.get
+          oldGcs.count.map(oldGcsCount => log.info(s"oldGcsCount=$oldGcsCount"))
+          oldGcs.map { oldBer =>
+            log.debug(s"GCS_BER=$oldBer")
+          }
+          val sideGcs = mapWithIdempotentKeyAndGlobalWindow(
+            optionalOldBers.get,
+            getIdempotentNotificationKey,
+            newBerWithInitalLoadEventId,
+            applyDistinctByKey = true
+          ).distinctByKey.asMapSingletonSideInput
+          getNonDuplicatedNotificationPubSubAndGcs(avroBers, sideGcs)
+        } else {
+          log.info(s"GCS_BER=EMPTY_HISTORICAL")
+          val pubSub = mapWithIdempotentKeyAndGlobalWindow(avroBers, getIdempotentNotificationKey, winOptions = Some(windowOptions))
+          val okKoBers = okAndKoBers(pubSub.values)
+          (okKoBers._1, pubSub)
         }
-        val sideGcs = mapWithIdempotentKeyAndGlobalWindow(
-          optionalOldBers.get,
-          getIdempotentNotificationKey,
-          newBerWithInitalLoadEventId,
-          applyDistinctByKey = true
-        ).distinctByKey
-          .asMapSingletonSideInput
-        getNonDuplicatedNotificationPubSubAndGcs(avroBers, sideGcs)
-      } else {
-        log.info(s"GCS_BER=EMPTY_HISTORICAL")
-        val pubSub =
-          mapWithIdempotentKeyAndGlobalWindow(avroBers, getIdempotentNotificationKey, winOptions = Some(windowOptions))
-        val okKoBers = okAndKoBers(pubSub.values)
-        (okKoBers._1, pubSub)
-      }
       val koBers = allDistinctKoAndNotSentBers._1
       val okNotSentBers = allDistinctKoAndNotSentBers._2.distinctByKey.map { record =>
         KV.of(record._1, record._2)
       }
-      // KO
+      // KO in GCS
       val windowedKoBers = toIntervalWindowAndIterable[MyEventRecord](30, koBers)
       windowedKoBers.count.map(koBersCount => log.info(s"sinking in GCSkoBers=$koBersCount"))
       SinkUtils.sinkAvroInGCS[MyEventRecord](windowedKoBers, s"gs://${mediationConfig.gcsBucket}/toxic/")
 
       // 5) Key & State => HttpResponse
       okNotSentBers.count.map(okNotSentBersCount => log.info(s"okNotSentBersCount=$okNotSentBersCount"))
-      val notificationsForAnalytics = applyBerKVState(berKVState, okNotSentBers).map { m =>
-        val nhubResponse = m.getValue
-        log.info(s"NOTIFICATION_RESPONSE=$nhubResponse")
-        val successAndFullDescr = isSuccessAndFullResultDescr(nhubResponse)
-        val berAnalytics = newEventRecordWithSuccess(m.getKey, successAndFullDescr._1, Some(successAndFullDescr._2), None)
-        log.info(s"NOTIFICATION_ANALYTICS=$berAnalytics}")
-        berAnalytics
-      }
+      val notificationsForAnalytics = bersAfterHttpResponse(applyBerKVState(berKVState, okNotSentBers))
 
-      // 6) Sink YOUR_ENDPOINT BERs in PubSub: analytics and InitialLoad
+      // 6) Sink YOUR_ENDPOINT Notifications in PubSub: for analytics and InitialLoad
       log.info(s"Sinking YOUR_ENDPOINT NOTIFICATION topic=$pubsubAvroAnalytics")
-      //PubSubProducer.writeGenericAvroScio[MyEventRecord](notificationsForAnalytics, pubsubAvroAnalytics)
+      // PubSubProducer.writeGenericAvroScio[MyEventRecord](notificationsForAnalytics, pubsubAvroAnalytics)
 
       sc.run()
     } catch {
@@ -157,24 +151,33 @@ object MediationService {
     timestampCombiner = TimestampCombiner.LATEST
   )
 
+  /**
+   * This is a workaround for avoiding duplicates in fresh data (PubSub) against historical. A potential option is to load historical
+   * records from Pubsub, so that KV State and Timer can be applied.
+   * @param pubSubFreshData
+   * @param historicalSideInputGcs
+   * @return
+   */
   def getNonDuplicatedNotificationPubSubAndGcs(
-                                                pubSubBers: SCollection[MyEventRecord],
-                                                sideGcs: SideInput[Map[String, MyEventRecord]]
-                                              ): (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = {
-    log.info(s"loaded_union_gcs_bers=false")
-    val pubSubRecords: SCollection[(String, MyEventRecord)] = mapWithIdempotentKeyAndGlobalWindow(pubSubBers, getIdempotentNotificationKey, winOptions = Some(windowOptions))
+    pubSubFreshData: SCollection[MyEventRecord],
+    historicalSideInputGcs: SideInput[Map[String, MyEventRecord]]
+  ): (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = {
+    log.info(s"loading historicalSideInputGcs for avoiding duplicates...")
+    def isGcsHistoricalTimeExpired = new DateTime(jodaNowGetMillis).getMillis > expiringHistoricalTime.getMillis
+    val pubSubRecords: SCollection[(String, MyEventRecord)] =
+      mapWithIdempotentKeyAndGlobalWindow(pubSubFreshData, getIdempotentNotificationKey, winOptions = Some(windowOptions))
     val okKoBers: (SCollection[MyEventRecord], SCollection[MyEventRecord]) = okAndKoBers(pubSubRecords.values)
     lazy val newBers = {
       lazy val newBerAgainstGcs = pubSubRecords
-        .withSideInputs(sideGcs)
+        .withSideInputs(historicalSideInputGcs)
         .map { (kvBer, sideInputContext) =>
           lazy val (idempotentKey, pubSubBer) = kvBer
           if (!isGcsHistoricalTimeExpired) {
-            val gcsBerMap = sideInputContext(sideGcs)
+            val gcsBerMap = sideInputContext(historicalSideInputGcs)
             val duplicatedBerFromGcs = gcsBerMap.get(idempotentKey)
             duplicatedBerFromGcs.isEmpty match {
               case false => Left((idempotentKey, duplicatedBerFromGcs.get)) // duplicated
-              case true => Right((idempotentKey, pubSubBer))
+              case true  => Right((idempotentKey, pubSubBer))
             }
           } else Right((idempotentKey, pubSubBer))
         }
@@ -184,7 +187,7 @@ object MediationService {
         2,
         { btrOrError =>
           btrOrError match {
-            case Left(_) => 0
+            case Left(_)  => 0
             case Right(_) => 1
           }
         }
@@ -200,28 +203,27 @@ object MediationService {
     (okKoBers._1, newBers)
   }
 
-  def isGcsHistoricalTimeExpired = new DateTime(jodaNowGetMillis).getMillis > expiringHistoricalTime.getMillis
-
   def mapWithIdempotentKeyAndGlobalWindow(
-                                           windowedAvroBers: SCollection[MyEventRecord],
-                                           transformationForBerKey: MyEventRecord => String,
-                                           transformationForBer: MyEventRecord => MyEventRecord = identity,
-                                           winOptions: Option[WindowOptions] = None,
-                                           applyDistinctByKey: Boolean = false
-                                         ): SCollection[(String, MyEventRecord)] = {
-    val result = windowedAvroBers
-      .map(record => (transformationForBerKey(record), record))
-    val distinctResult =
-      if (applyDistinctByKey) result.distinctByKey // long distinct among windows will minimize duplicates
-      else result
+    windowedAvroBers: SCollection[MyEventRecord],
+    transformationForBerKey: MyEventRecord => String,
+    transformationForBer: MyEventRecord => MyEventRecord = identity,
+    winOptions: Option[WindowOptions] = None,
+    applyDistinctByKey: Boolean = false
+  ): SCollection[(String, MyEventRecord)] = {
+    val result = windowedAvroBers.map(record => (transformationForBerKey(record), record))
+
+    // distinctByKey minimizes duplicates
+    val distinctResult = if (applyDistinctByKey) result.distinctByKey else result
+
     val kvResult = distinctResult
       .map(record =>
         (record._1, transformationForBer(record._2))
       ) // distinct does not work here, due to: ParDo requires its input to use KvCoder in order to use state and timers
-    // for keeping State among elements
+
+    // window for keeping State among elements
     winOptions match {
       case Some(opt) => kvResult.withGlobalWindow(opt)
-      case None => kvResult.withGlobalWindow()
+      case None      => kvResult.withGlobalWindow()
     }
   }
 
@@ -230,14 +232,14 @@ object MediationService {
       .map { record =>
         isBerValid(record) match {
           case false => Left(record)
-          case true => Right(record)
+          case true  => Right(record)
         }
       }
       .partition(
         2,
         { avro =>
           avro match {
-            case Left(_) => 0
+            case Left(_)  => 0
             case Right(_) => 1
           }
         }
@@ -246,9 +248,20 @@ object MediationService {
   }
 
   def applyBerKVState(
-                       berKVState: StateAsyncParDoWithHttpHandler,
-                       windowedBers: SCollection[KV[String, MyEventRecord]]
-                     ): SCollection[StateAndTimerType.KVOutputBerAndHttpResponse] = windowedBers.applyTransform(ParDo.of(berKVState))
+    berKVState: StateAsyncParDoWithHttpHandler,
+    windowedBers: SCollection[KV[String, MyEventRecord]]
+  ): SCollection[StateAndTimerType.KVOutputBerAndHttpResponse] = windowedBers.applyTransform(ParDo.of(berKVState))
+
+  def bersAfterHttpResponse(httpResponse: SCollection[StateAndTimerType.KVOutputBerAndHttpResponse]): SCollection[MyEventRecord] =
+    httpResponse
+      .map { m =>
+        val nhubResponse = m.getValue
+        log.debug(s"NOTIFICATION_RESPONSE=$nhubResponse")
+        val successAndFullDescr = isSuccessAndFullResultDescr(nhubResponse)
+        val notificationAnalytics = newEventRecordWithSuccess(m.getKey, successAndFullDescr._1, Some(successAndFullDescr._2), None)
+        log.info(s"NOTIFICATION_ANALYTICS=$notificationAnalytics}")
+        notificationAnalytics
+      }
 
   def getOldAvrosFromGCS(absoluteAvroPath: String, initialLoadBersDays: Integer, sc: ScioContext) = {
     val dates = getLastDateDaysFrom(initialLoadBersDays)

@@ -22,12 +22,23 @@ package object configs {
                         berWindow: String,
                         httpClientType: String,
                         ttlTime: Int,
+                        akka: Option[Akka],
                         sslConfigPath: SslConfigPath,
                         endpoint: Endpoint
   )
 
+  case class Akka(
+                   maxOpenRequests: Int,
+                   maxOpenConnection: Int,
+                   initialTimeout: Long,
+                   completionTimeout: Long,
+                   buffer: Int,
+                   throttleRequests: Int,
+                   throttlePerSecond: Int,
+                   throttleBurst: Int
+                 )
+
   case class Endpoint(
-                       targetDevice: String,
                        fullUrl: String,
                        url: String,
                        domain: String,
