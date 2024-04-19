@@ -2,12 +2,10 @@ import sbt.Keys._
 import sbt._
 
 val projectName = "scio-db"
-// https://github.com/spotify/scio/releases/tag/v0.14.0
-val scioVersion = "0.14.2"
-val beamVersion = "2.54.0"
+// https://github.com/spotify/scio/releases/tag/v0.14.4
+val scioVersion = "0.14.4"
+val beamVersion = "2.55.1"
 val scalaMayorVersion = "2.12"
-val dataModellingVersion = "2.0.2-SNAPSHOT"
-val scalaUtilsVersion = "2.0.0-SNAPSHOT"
 val scalaMacrosVersion = "2.1.1"
 
 logLevel := Level.Info
@@ -27,7 +25,7 @@ lazy val commonSettings = Def.settings(
   organization := "com.db.myproject",
   // Semantic versioning http://semver.org/
   version := "0.0.2-SNAPSHOT",
-  scalaVersion := "2.12.17",
+  scalaVersion := "2.12.19",
   // scala-steward:on
   resolvers += "confluent" at "https://packages.confluent.io/maven/",
   resolvers += Resolver.mavenLocal

@@ -23,7 +23,7 @@ package object configs {
                         httpClientType: String,
                         ttlTime: Int,
                         akka: Option[Akka],
-                        sslConfigPath: SslConfigPath,
+                        sslConfigPath: Option[SslConfigPath],
                         endpoint: Endpoint
   )
 
@@ -42,7 +42,7 @@ package object configs {
                        fullUrl: String,
                        url: String,
                        domain: String,
-                       enabled: Boolean,
+                       certEnabled: Boolean,
                        username: String,
                        password: String)
 

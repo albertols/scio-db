@@ -6,14 +6,14 @@ import com.db.myproject.mediation.avro.MyEventRecordUtils.newEventRecordWithSucc
 import scala.collection.JavaConverters._
 
 object NotificationsMockData {
-  val null_nhub_debit_quique: MyEventRecord = {
+  val not_sent_debit_quique: MyEventRecord = {
     val event = new Event()
-    event.setId("5e309591-b26f-4272-8a56-5e27bfdcc6e6")
+    event.setId("11")
     event.setTransactionId("unique_kcop")
     event.setNhubTimestamp(1707680509490L)
 
     val customer = new Customer()
-    customer.setId("80696970")
+    customer.setId("1")
     customer.setFullName("Quique Cortés")
 
     val notification = new Notification()
@@ -29,14 +29,14 @@ object NotificationsMockData {
       .build
   }
 
-  val null_nhub_debit_abuela: MyEventRecord = {
+  val not_sent_debit_abuela: MyEventRecord = {
     val event = new Event()
-    event.setId("5e309591-b26f-4272-8a56-5e27bfdcc6e6")
+    event.setId("22")
     event.setTransactionId("unique_abu")
     event.setNhubTimestamp(1707680509490L)
 
     val customer = new Customer()
-    customer.setId("356802")
+    customer.setId("2")
     customer.setFullName("Abuela Moreno")
 
     val notification = new Notification()
@@ -52,7 +52,7 @@ object NotificationsMockData {
       .build
   }
 
-  val true_nhub_debit_quique: MyEventRecord =
-    newEventRecordWithSuccess(null_nhub_debit_quique, true, Some("SUCESSFUL PUSH"), Some(0))
+  val true_sent_debit_quique: MyEventRecord =
+    newEventRecordWithSuccess(not_sent_debit_quique, true, Some("SUCESSFUL PUSH"), Some(0))
 
 }

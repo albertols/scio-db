@@ -4,9 +4,9 @@ import com.db.myproject.mediation.avro.MyEventRecordUtils.newEventRecordOK
 import com.db.myproject.mediation.configs.absoluteURL
 import com.db.myproject.mediation.http.StateAndTimerType.{FutureKVOutputBerAndHttpResponse, InputBer, OutputBer}
 import com.db.myproject.mediation.http.clients.AbstractHttpClient
-import com.db.myproject.mediation.nhub.NhubFactory.getRequest
-import com.db.myproject.mediation.nhub.model.MyHttpRequest
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.NotificationResponse
+import com.db.myproject.mediation.notification.NotificationFactory.getRequest
+import com.db.myproject.mediation.notification.model.MyHttpRequest
+import com.db.myproject.mediation.notification.model.MyHttpResponse.NotificationResponse
 import com.db.myproject.utils.time.TimeUtils.jodaNowGetMillis
 import org.apache.beam.sdk.values.KV
 import org.slf4j.{Logger, LoggerFactory}
@@ -64,7 +64,7 @@ object ZioHttpClient {
     Scope.default
 
   def sendPushWithRequest(record: InputBer) = for {
-    requestDto <- ZIO.succeed(getRequest(record, mediationConfig))
+    requestDto <- ZIO.succeed(getRequest(record))
     responseDto <- sendPushWithResponse(requestDto, record)
   } yield responseDto
 
@@ -93,7 +93,7 @@ object ZioHttpClient {
       responseDto <- ZIO
         .fromEither(responseBody.fromJson[NotificationResponse])
         .mapError(new RuntimeException(_)) // Converting parsing error to Throwable
-    } yield KV.of(newEventRecordOK(record, beforeNhubTs, responseDto.resultDescr), responseDto)
+    } yield KV.of(newEventRecordOK(record, beforeNhubTs, responseDto.body), responseDto)
   }
 
 }

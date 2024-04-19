@@ -4,7 +4,7 @@ import com.db.myproject.mediation.avro.MyEventRecord
 import com.db.myproject.mediation.avro.MyEventRecordUtils._
 import com.db.myproject.mediation.configs.MediationConfig
 import com.db.myproject.mediation.http.{StateAndTimerType, StateAsyncParDoWithHttpHandler}
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.isSuccessAndFullResultDescr
+import com.db.myproject.mediation.notification.model.MyHttpResponse.{NotificationResponse, isSuccessAndFullResultDescr}
 import com.db.myproject.streaming.utils.SinkUtils
 import com.db.myproject.streaming.utils.WindowUtils.toIntervalWindowAndIterable
 import com.db.myproject.streaming.utils.dofn.ssl.SslConfig.SslConfigPath
@@ -63,8 +63,9 @@ object MediationService {
   var defaultConfigPath = "mediation/application.conf"
 
   /* common HTTP Client config */
-  implicit lazy val url = mediationConfig.mediation.endpoint.fullUrl
-  implicit lazy val domain = mediationConfig.mediation.endpoint.url
+  implicit lazy val fullUrl = mediationConfig.mediation.endpoint.fullUrl
+  implicit lazy val url = mediationConfig.mediation.endpoint.url
+  implicit lazy val domain = mediationConfig.mediation.endpoint.domain
   implicit lazy val akkaConfig = mediationConfig.mediation.akka.get
 
   def main(cmdlineArgs: Array[String]): Unit = {
@@ -252,7 +253,7 @@ object MediationService {
     windowedBers: SCollection[KV[String, MyEventRecord]]
   ): SCollection[StateAndTimerType.KVOutputBerAndHttpResponse] = windowedBers.applyTransform(ParDo.of(berKVState))
 
-  def bersAfterHttpResponse(httpResponse: SCollection[StateAndTimerType.KVOutputBerAndHttpResponse]): SCollection[MyEventRecord] =
+  def bersAfterHttpResponse(httpResponse: SCollection[StateAndTimerType.KVOutputBerAndHttpResponse]): SCollection[(NotificationResponse, MyEventRecord)] =
     httpResponse
       .map { m =>
         val nhubResponse = m.getValue
@@ -260,7 +261,7 @@ object MediationService {
         val successAndFullDescr = isSuccessAndFullResultDescr(nhubResponse)
         val notificationAnalytics = newEventRecordWithSuccess(m.getKey, successAndFullDescr._1, Some(successAndFullDescr._2), None)
         log.info(s"NOTIFICATION_ANALYTICS=$notificationAnalytics}")
-        notificationAnalytics
+        (nhubResponse, notificationAnalytics)
       }
 
   def getOldAvrosFromGCS(absoluteAvroPath: String, initialLoadBersDays: Integer, sc: ScioContext) = {

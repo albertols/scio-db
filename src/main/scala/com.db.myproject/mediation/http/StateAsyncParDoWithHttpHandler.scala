@@ -11,7 +11,7 @@ import com.db.myproject.mediation.http.clients.zio.ZioHttpClient
 import com.db.myproject.mediation.http.clients.AbstractHttpClient
 import com.db.myproject.mediation.http.clients.akka.AkkaHttpClient
 import com.db.myproject.mediation.http.state.StateScalaAsyncDoFn
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.{
+import com.db.myproject.mediation.notification.model.MyHttpResponse.{
   emptyNotificationResponse,
   koNotificationResponse,
   NHUBResultEnum

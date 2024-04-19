@@ -1,19 +1,21 @@
-package com.db.myproject.mediation.nhub.model
+package com.db.myproject.mediation.notification.model
 
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import spray.json.DefaultJsonProtocol
 
 object MyHttpResponse extends DefaultJsonProtocol with SprayJsonSupport {
-  implicit val format = jsonFormat7(NotificationResponse.apply)
+  implicit val format = jsonFormat4(NotificationResponse.apply)
+
+  val NOT_HTTP_RESPONSE = 0
 
   def koNotificationResponse(exceptionDescr: String) =
-    NotificationResponse("", "", "", "", NHUBResultEnum.NHUB_KO.toString, exceptionDescr, "")
+    NotificationResponse(NOT_HTTP_RESPONSE, "", NHUBResultEnum.NHUB_KO.toString, 0)
 
   def emptyNotificationResponse(nHUBResultEnum: NHUBResultEnum.Value) =
-    NotificationResponse("", "", "", "", nHUBResultEnum.toString, "", "")
+    NotificationResponse(NOT_HTTP_RESPONSE, "", nHUBResultEnum.toString, 0)
 
   def isSuccessAndFullResultDescr(response: NotificationResponse) = {
-    val fullDescr = s"${response.resultDescr}#${response.result}"
+    val fullDescr = response.body
     val success = fullDescr.toLowerCase match {
       case x if x.contains("error") => false
       case x if x.contains("ko")    => false
@@ -22,14 +24,14 @@ object MyHttpResponse extends DefaultJsonProtocol with SprayJsonSupport {
     (success, fullDescr)
   }
 
+  /*
+   * https://jsonplaceholder.typicode.com/posts
+   */
   case class NotificationResponse(
-    appId: String,
-    deviceId: String,
-    deviceModel: String,
-    deviceName: String,
-    result: String,
-    resultDescr: String,
-    serverTrxId: String
+    id: Int,
+    title: String,
+    body: String,
+    userId: Int
   )
 
   object NHUBResultEnum extends Enumeration {

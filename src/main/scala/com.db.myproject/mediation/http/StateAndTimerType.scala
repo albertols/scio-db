@@ -1,7 +1,7 @@
 package com.db.myproject.mediation.http
 
 import com.db.myproject.mediation.avro.MyEventRecord
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.NotificationResponse
+import com.db.myproject.mediation.notification.model.MyHttpResponse.NotificationResponse
 import org.apache.beam.sdk.values.KV
 
 import scala.concurrent.Future

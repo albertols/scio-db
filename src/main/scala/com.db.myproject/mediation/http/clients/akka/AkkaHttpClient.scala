@@ -12,9 +12,9 @@ import com.db.myproject.mediation.avro.MyEventRecordUtils.newBerWithLastNHubTime
 import com.db.myproject.mediation.configs.absoluteURL
 import com.db.myproject.mediation.http.StateAndTimerType.{FutureKVOutputBerAndHttpResponse, InputBer, OutputBer}
 import com.db.myproject.mediation.http.clients.AbstractHttpClient
-import com.db.myproject.mediation.nhub.NhubFactory.getRequest
-import com.db.myproject.mediation.nhub.model.MyHttpResponse.NotificationResponse
-import com.db.myproject.mediation.nhub.model.MyHttpRequest
+import com.db.myproject.mediation.notification.NotificationFactory.getRequest
+import com.db.myproject.mediation.notification.model.MyHttpResponse.NotificationResponse
+import com.db.myproject.mediation.notification.model.MyHttpRequest
 import com.db.myproject.utils.time.TimeUtils.jodaNowGetMillis
 import org.apache.beam.sdk.values.KV
 import org.slf4j.{Logger, LoggerFactory}
@@ -44,7 +44,7 @@ class AkkaHttpClient extends AbstractHttpClient {
 object AkkaHttpClient extends Serializable {
 
   import akka.http.scaladsl.settings.ConnectionPoolSettings
-  import com.db.myproject.mediation.MediationService.{akkaConfig, domain, mediationConfig, url}
+  import com.db.myproject.mediation.MediationService.{akkaConfig, domain, mediationConfig, fullUrl, url}
   import scala.concurrent.duration._
 
   lazy val connectionPoolSettings = ConnectionPoolSettings(system)
@@ -52,8 +52,8 @@ object AkkaHttpClient extends Serializable {
     .withMaxConnections(akkaConfig.maxOpenConnection)
 
   private val log: Logger = LoggerFactory.getLogger(getClass.getName)
-  implicit val sslConfig = MySslConfig(mediationConfig.mediation.sslConfigPath, mediationConfig.gcp.project).sslConfig
-  val httpsConnectionContext = AkkaSSLContextFromSecretManager.httpsConnectionContext
+  implicit lazy val sslConfig = MySslConfig(mediationConfig.mediation.sslConfigPath.get, mediationConfig.gcp.project).sslConfig
+  lazy val httpsSSLConnectionContext = AkkaSSLContextFromSecretManager.httpsConnectionContext
 
   lazy val poolClientFlow = poolClient
     .initialTimeout(FiniteDuration(akkaConfig.initialTimeout, TimeUnit.SECONDS))
@@ -62,26 +62,29 @@ object AkkaHttpClient extends Serializable {
     .throttle(akkaConfig.throttleRequests, akkaConfig.throttlePerSecond.second, akkaConfig.throttleBurst, ThrottleMode.Shaping)
 
   lazy val poolClient: Flow[(HttpRequest, Any), (Try[HttpResponse], Any), Any] =
-    if (url.contains("https"))
-      Http().cachedHostConnectionPoolHttps(domain, connectionContext = httpsConnectionContext, settings = connectionPoolSettings)
-    else Http().cachedHostConnectionPool(domain, settings = connectionPoolSettings)
+    if (fullUrl.contains("https")) {
+      mediationConfig.mediation.endpoint.certEnabled match {
+        case true => Http().cachedHostConnectionPoolHttps(url, connectionContext = httpsSSLConnectionContext, settings = connectionPoolSettings)
+        case false => Http().cachedHostConnectionPoolHttps(url, settings = connectionPoolSettings)
+      }
+    } else Http().cachedHostConnectionPool(url, settings = connectionPoolSettings)
 
   implicit val system: ActorSystem = ActorSystem()
   implicit val materializer: ActorMaterializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
 
-  def sendPush(record: InputBer) =
-      getResponseFuture(
-        getRequest(record, mediationConfig)
-          .asInstanceOf[MyHttpRequest.HttpRequest]
-          .toJson
-          .toString,
-        absoluteURL(mediationConfig)
-      )
+  def sendPush(record: InputBer): Future[(Try[HttpResponse], Any)] =
+    getResponseFuture(
+      getRequest(record)
+        .asInstanceOf[MyHttpRequest.HttpRequest]
+        .toJson
+        .toString,
+      absoluteURL(mediationConfig)
+    )
 
   def getResponseFuture(reqRawString: String, url: String): Future[(Try[HttpResponse], Any)] = {
     log.info(s"reqRawString=$reqRawString")
-    val entity = HttpEntity(ContentTypes.`application/json`, ByteString(reqRawString))
+    val entity = HttpEntity(MediaTypes.`application/json`, ByteString(reqRawString))
     val httpRequest = HttpRequest(
       method = HttpMethods.POST,
       uri = url,
