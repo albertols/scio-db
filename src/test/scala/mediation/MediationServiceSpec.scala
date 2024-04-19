@@ -12,8 +12,9 @@ import com.db.myproject.utils.enumeration.EnumUtils
 import com.db.myproject.utils.pureconfig.{PureConfigEnvEnum, PureConfigSourceEnum}
 import com.spotify.scio.coders.kryo.fallback
 import com.spotify.scio.testing.{PipelineSpec, TestStreamScioContext, testStreamOf}
-import com.spotify.scio.values.SCollection
+import com.spotify.scio.values.{SCollection, SideInput}
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException
+import org.apache.beam.sdk.testing.TestStream
 import org.apache.beam.sdk.values.{KV, TimestampedValue}
 import org.joda.time.{Duration, Instant}
 
@@ -43,7 +44,7 @@ class MediationServiceSpec extends PipelineSpec {
 
   "1 OK and 2 SENT_OR_DUPLICATED HTTP_RESPONSE" should "exist in the same stream" in {
     // simulates similar stream as PubSub
-    val streamWithDuplicates = testStreamOf[MyEventRecord]
+    val streamWithDuplicates: TestStream[MyEventRecord] = testStreamOf[MyEventRecord]
       // Start at the epoch
       .advanceWatermarkTo(baseTime)
       // add some elements ahead of the watermark
@@ -56,7 +57,7 @@ class MediationServiceSpec extends PipelineSpec {
       .advanceWatermarkToInfinity
 
     runWithContext { sc =>
-      val okNotSentBers = MediationService
+      val okNotSentBers: SCollection[KV[String, MyEventRecord]] = MediationService
         .mapWithIdempotentKeyAndGlobalWindow(
           sc.testStream(streamWithDuplicates),
           ber => getIdempotentNotificationKey(ber)
@@ -70,8 +71,8 @@ class MediationServiceSpec extends PipelineSpec {
       val httpResponses: SCollection[MyHttpResponse.NotificationResponse] = bersForAnalytics.keys
 
       httpResponses should {
-        val expectedOkHttpResponse = MyHttpResponse.NotificationResponse(
-          101, // id automatically returned by
+        val expectedOkHttpResponse: MyHttpResponse.NotificationResponse = MyHttpResponse.NotificationResponse(
+          101, // id automatically returned by jsonplaceholder.typicode.com
           title = not_sent_debit_quique.getNotification.getId.toString,
           body = not_sent_debit_quique.getNotification.getMessage.toString,
           userId = not_sent_debit_quique.getCustomer.getId.toString.toInt
@@ -92,8 +93,8 @@ class MediationServiceSpec extends PipelineSpec {
 
   "getIdempotentNotificationKey and mapBerWithIdempotentKeyAndGlobalWindow" should "validate idempotent key" in {
     runWithContext { sc =>
-      val streamingBer = sc.parallelize(Seq(not_sent_debit_quique)) // also OK
-      val initialBers = MediationService.mapWithIdempotentKeyAndGlobalWindow(streamingBer, ber => getIdempotentNotificationKey(ber))
+      val streamingBer: SCollection[MyEventRecord] = sc.parallelize(Seq(not_sent_debit_quique)) // also OK
+      val initialBers: SCollection[(String, MyEventRecord)] = MediationService.mapWithIdempotentKeyAndGlobalWindow(streamingBer, ber => getIdempotentNotificationKey(ber))
 
       val ok_idempotent_key = s"unique_kcop-1"
       println(s"ok_idempotent_key=$ok_idempotent_key")
@@ -120,7 +121,7 @@ class MediationServiceSpec extends PipelineSpec {
 
   "okAndKoBers" should "correctly partition valid and invalid records" in {
     runWithContext { sc =>
-      val input = sc.parallelize(Seq(not_sent_debit_quique, invalidRecord))
+      val input: SCollection[MyEventRecord] = sc.parallelize(Seq(not_sent_debit_quique, invalidRecord))
       val (koRecords, okRecords) = MediationService.okAndKoBers(input)
 
       val validRecords = okRecords
@@ -132,19 +133,19 @@ class MediationServiceSpec extends PipelineSpec {
   }
 
   "getNonDuplicatedBerPubSubAndGcs" should "have empty okNotSentBers when historical notification exists" in {
-    val pubSubStream = testStreamOf[MyEventRecord]
+    val pubSubStream: TestStream[MyEventRecord] = testStreamOf[MyEventRecord]
       .advanceWatermarkTo(new Instant(0))
       .addElements(not_sent_debit_quique)
       .advanceWatermarkToInfinity
 
     runWithContext { sc =>
-      val historicalGcsBers = sc.parallelize(Seq(true_sent_debit_quique))
-      lazy val sideGcs = mapWithIdempotentKeyAndGlobalWindow(
+      val historicalGcsBers: SCollection[MyEventRecord] = sc.parallelize(Seq(true_sent_debit_quique))
+      lazy val sideGcs: SideInput[Map[String, MyEventRecord]] = mapWithIdempotentKeyAndGlobalWindow(
         historicalGcsBers,
         getIdempotentNotificationKey,
         newBerWithInitalLoadEventId
       ).asMapSingletonSideInput
-      val allDistinctBers = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
+      val allDistinctBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
       val koBers = allDistinctBers._1
       val okNotSentBers = allDistinctBers._2
       koBers should beEmpty
@@ -153,38 +154,38 @@ class MediationServiceSpec extends PipelineSpec {
   }
 
   "duplicated historical notifications without distinctByKey" should "throw Exception due to SideInput lookup" in {
-    val pubSubStream = testStreamOf[MyEventRecord]
+    val pubSubStream: TestStream[MyEventRecord] = testStreamOf[MyEventRecord]
       .advanceWatermarkTo(new Instant(0))
       .addElements(not_sent_debit_quique)
       .advanceWatermarkToInfinity
 
     an[PipelineExecutionException] should be thrownBy {
       runWithContext { sc =>
-        val historicalGcsBers = sc.parallelize(Seq(true_sent_debit_quique, true_sent_debit_quique))
-        lazy val sideGcs = mapWithIdempotentKeyAndGlobalWindow(
+        val historicalGcsBers: SCollection[MyEventRecord] = sc.parallelize(Seq(true_sent_debit_quique, true_sent_debit_quique))
+        lazy val sideGcs: SideInput[Map[String, MyEventRecord]] = mapWithIdempotentKeyAndGlobalWindow(
           historicalGcsBers,
           getIdempotentNotificationKey,
           newBerWithInitalLoadEventId
         ).asMapSingletonSideInput
-        val allDistinctBers = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
+        val allDistinctBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
       }
     }
   }
 
   "getNonDuplicatedBerPubSubAndGcs" should "have empty okNotSentBers when historical exist despite nhubSuccess=null" in {
-    val pubSubStream = testStreamOf[MyEventRecord]
+    val pubSubStream: TestStream[MyEventRecord] = testStreamOf[MyEventRecord]
       .advanceWatermarkTo(new Instant(0))
       .addElements(not_sent_debit_quique)
       .advanceWatermarkToInfinity
 
     runWithContext { sc =>
-      val historicalGcsBers = sc.parallelize(Seq(not_sent_debit_quique))
+      val historicalGcsBers: SCollection[MyEventRecord] = sc.parallelize(Seq(not_sent_debit_quique))
       lazy val sideGcs = mapWithIdempotentKeyAndGlobalWindow(
         historicalGcsBers,
         getIdempotentNotificationKey,
         newBerWithInitalLoadEventId
       ).asMapSingletonSideInput
-      val allDistinctBers = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
+      val allDistinctBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = MediationService.getNonDuplicatedNotificationPubSubAndGcs(sc.testStream(pubSubStream), sideGcs)
       val koBers = allDistinctBers._1
       val okNotSentBers = allDistinctBers._2
       koBers should beEmpty

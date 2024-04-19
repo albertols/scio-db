@@ -164,7 +164,6 @@ object MediationService {
     historicalSideInputGcs: SideInput[Map[String, MyEventRecord]]
   ): (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) = {
     log.info(s"loading historicalSideInputGcs for avoiding duplicates...")
-    def isGcsHistoricalTimeExpired = new DateTime(jodaNowGetMillis).getMillis > expiringHistoricalTime.getMillis
     val pubSubRecords: SCollection[(String, MyEventRecord)] =
       mapWithIdempotentKeyAndGlobalWindow(pubSubFreshData, getIdempotentNotificationKey, winOptions = Some(windowOptions))
     val okKoBers: (SCollection[MyEventRecord], SCollection[MyEventRecord]) = okAndKoBers(pubSubRecords.values)
@@ -203,6 +202,8 @@ object MediationService {
     }
     (okKoBers._1, newBers)
   }
+
+  def isGcsHistoricalTimeExpired = new DateTime(jodaNowGetMillis).getMillis > expiringHistoricalTime.getMillis
 
   def mapWithIdempotentKeyAndGlobalWindow(
     windowedAvroBers: SCollection[MyEventRecord],
