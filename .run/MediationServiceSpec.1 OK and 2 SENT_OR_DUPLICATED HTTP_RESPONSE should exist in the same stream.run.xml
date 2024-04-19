@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="MediationServiceSpec" type="ScalaTestRunConfiguration" factoryName="ScalaTest" nameIsGenerated="true" show_console_on_std_err="false" show_console_on_std_out="false">
+  <configuration default="false" name="MediationServiceSpec.1 OK and 2 SENT_OR_DUPLICATED HTTP_RESPONSE should exist in the same stream" type="ScalaTestRunConfiguration" factoryName="ScalaTest" nameIsGenerated="true" show_console_on_std_err="false" show_console_on_std_out="false">
     <module name="scio-db" />
     <option name="VMParameters" value="-Dlogback.configurationFile=src/main/resources/local_logback.xml" />
     <option name="allowRunningInParallel" value="false" />
@@ -17,11 +17,12 @@
     <option name="selectedOptions">
       <list />
     </option>
-    <option name="testKind" value="Class" />
+    <option name="testKind" value="Test name" />
     <option name="workingDirectory" value="C:\Users\StratoSerna\IdeaProjects\scio-db" />
     <option name="javaOptions" value="-Dlogback.configurationFile=src/main/resources/local_logback.xml" />
     <option name="shortenClasspath" value="ARGS_FILE" />
     <option name="testClassPath" value="mediation.MediationServiceSpec" />
+    <option name="testName" value="1 OK and 2 SENT_OR_DUPLICATED HTTP_RESPONSE should exist in the same stream" />
     <option name="workingDirectory" value="C:\Users\StratoSerna\IdeaProjects\scio-db" />
     <method v="2">
       <option name="Make" enabled="true" />

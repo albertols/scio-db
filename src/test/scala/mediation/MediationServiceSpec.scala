@@ -1,38 +1,21 @@
 package mediation
 
-import com.db.myproject.mediation.avro.{MyEventRecord, _}
 import com.db.myproject.mediation.MediationService
-import com.db.myproject.mediation.MediationService.{
-  applyBerKVState,
-  berKVState,
-  bersAfterHttpResponse,
-  mapWithIdempotentKeyAndGlobalWindow,
-  windowOptions
-}
+import com.db.myproject.mediation.MediationService.{applyBerKVState, berKVState, bersAfterHttpResponse, mapWithIdempotentKeyAndGlobalWindow}
 import com.db.myproject.mediation.avro.MyEventRecordUtils.{getIdempotentNotificationKey, isBerValid, newBerWithInitalLoadEventId}
+import com.db.myproject.mediation.avro._
 import com.db.myproject.mediation.http.StateAndTimerType
 import com.db.myproject.mediation.notification.model.MyHttpResponse
-import com.db.myproject.mediation.notification.model.MyHttpResponse.NOT_HTTP_RESPONSE
+import com.db.myproject.mediation.notification.model.MyHttpResponse.SENT_OR_DUPLICATED
 import com.db.myproject.mediation.testing.NotificationsMockData.{not_sent_debit_quique, true_sent_debit_quique}
 import com.db.myproject.utils.enumeration.EnumUtils
 import com.db.myproject.utils.pureconfig.{PureConfigEnvEnum, PureConfigSourceEnum}
 import com.spotify.scio.coders.kryo.fallback
-import com.spotify.scio.streaming.DISCARDING_FIRED_PANES
-import com.spotify.scio.testing.{testStreamOf, PipelineSpec, TestStreamScioContext}
+import com.spotify.scio.testing.{PipelineSpec, TestStreamScioContext, testStreamOf}
 import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException
-import org.apache.beam.sdk.transforms.windowing.{
-  AfterPane,
-  AfterProcessingTime,
-  AfterWatermark,
-  GlobalWindow,
-  IntervalWindow,
-  Repeatedly,
-  TimestampCombiner
-}
 import org.apache.beam.sdk.values.{KV, TimestampedValue}
 import org.joda.time.{Duration, Instant}
-import org.scalatest.matchers.should
 
 import scala.collection.Seq
 
@@ -48,15 +31,6 @@ class MediationServiceSpec extends PipelineSpec {
     .setEvent(new Event())
     .build
 
-  "null_nhub_debit_quique" should "be null" in {
-    println(not_sent_debit_quique)
-    not_sent_debit_quique.getNotification.getNhubSuccess shouldBe null
-  }
-
-  "defaultMediationConfig gcsBucket" should "be empty" in {
-    testConfig.gcsBucket equals ""
-  }
-
   val baseTime = new Instant(0)
   val teamWindowDuration = Duration.standardMinutes(20)
   private def event(
@@ -67,52 +41,53 @@ class MediationServiceSpec extends PipelineSpec {
     TimestampedValue.of(myEventRecord, t)
   }
 
-  "HTTP_RESPONSE" should "exist" in {
-
-    val stream = testStreamOf[MyEventRecord]
+  "1 OK and 2 SENT_OR_DUPLICATED HTTP_RESPONSE" should "exist in the same stream" in {
+    // simulates similar stream as PubSub
+    val streamWithDuplicates = testStreamOf[MyEventRecord]
+      // Start at the epoch
+      .advanceWatermarkTo(baseTime)
+      // add some elements ahead of the watermark
       .addElements(event(not_sent_debit_quique, Duration.standardSeconds(1)))
-      .advanceWatermarkToInfinity()
+      // advance the watermark
+      .advanceWatermarkTo(baseTime.plus(Duration.standardSeconds(10)))
+      // duplicated elements
+      .addElements(event(not_sent_debit_quique, Duration.standardSeconds(5)))
+      .addElements(event(not_sent_debit_quique, Duration.standardSeconds(1)))
+      .advanceWatermarkToInfinity
 
     runWithContext { sc =>
-      val streamingBer = sc.testStream(stream).withGlobalWindow()
-      def winOptions = com.spotify.scio.values.WindowOptions(
-        allowedLateness = Duration.ZERO,
-        trigger = Repeatedly.forever(
-          AfterProcessingTime
-            .pastFirstElementInPane()
-            .plusDelayOf(Duration.standardMinutes(1))
-        ),
-        accumulationMode = DISCARDING_FIRED_PANES,
-        timestampCombiner = TimestampCombiner.EARLIEST
-      )
       val okNotSentBers = MediationService
         .mapWithIdempotentKeyAndGlobalWindow(
-          streamingBer,
-          ber => getIdempotentNotificationKey(ber),
-          winOptions = Some(windowOptions)
+          sc.testStream(streamWithDuplicates),
+          ber => getIdempotentNotificationKey(ber)
         )
-        .distinctByKey
+        // .distinctByKey // not applied as it would get rid of the same records in GlobalWindow
         .map { ber =>
           KV.of(ber._1, ber._2)
         }
       val appliedState: SCollection[StateAndTimerType.KVOutputBerAndHttpResponse] = applyBerKVState(berKVState, okNotSentBers)
-      val bersForAnalytics = bersAfterHttpResponse(appliedState)
-      val httpResponses = bersForAnalytics.keys
-      // bersForAnalytics shouldNot beEmpty
-      val expectedHttpResponse = MyHttpResponse.NotificationResponse(
-        101,
-        title = not_sent_debit_quique.getNotification.getId.toString,
-        body = not_sent_debit_quique.getNotification.getMessage.toString,
-        userId = not_sent_debit_quique.getCustomer.getId.toString.toInt
-      )
-      // val expectedOutput: StateAndTimerType.KVOutputBerAndHttpResponse = KV.of(not_sent_debit_quique, expectedHttpResponse)
+      val bersForAnalytics: SCollection[(MyHttpResponse.NotificationResponse, MyEventRecord)] = bersAfterHttpResponse(appliedState)
+      val httpResponses: SCollection[MyHttpResponse.NotificationResponse] = bersForAnalytics.keys
 
-      val window = new IntervalWindow(baseTime, teamWindowDuration)
-      httpResponses should inEarlyGlobalWindowPanes  {
-        containInAnyOrder(Seq(expectedHttpResponse))
+      httpResponses should {
+        val expectedOkHttpResponse = MyHttpResponse.NotificationResponse(
+          101, // id automatically returned by
+          title = not_sent_debit_quique.getNotification.getId.toString,
+          body = not_sent_debit_quique.getNotification.getMessage.toString,
+          userId = not_sent_debit_quique.getCustomer.getId.toString.toInt
+        )
+        containInAnyOrder(Seq(expectedOkHttpResponse, SENT_OR_DUPLICATED, SENT_OR_DUPLICATED))
       }
-
     }
+  }
+
+  "null_nhub_debit_quique" should "be null" in {
+    println(not_sent_debit_quique)
+    not_sent_debit_quique.getNotification.getNhubSuccess shouldBe null
+  }
+
+  "defaultMediationConfig gcsBucket" should "be empty" in {
+    testConfig.gcsBucket equals ""
   }
 
   "getIdempotentNotificationKey and mapBerWithIdempotentKeyAndGlobalWindow" should "validate idempotent key" in {
@@ -126,7 +101,7 @@ class MediationServiceSpec extends PipelineSpec {
         (ok_idempotent_key, not_sent_debit_quique)
       )
 
-      val ko_idempotent_key = s"trimmer_kcop-BAD_CONSTUMER"
+      val ko_idempotent_key = s"trimmer_kcop-BAD_COSTUMER"
       println(s"ko_idempotent_key=$ko_idempotent_key")
       initialBers shouldNot containSingleValue(
         (s"ko_idempotent_key", not_sent_debit_quique)
@@ -156,7 +131,7 @@ class MediationServiceSpec extends PipelineSpec {
     }
   }
 
-  "getNonDuplicatedBerPubSubAndGcs" should "have empty okNotSentBers when historical nhubSuccess=true" in {
+  "getNonDuplicatedBerPubSubAndGcs" should "have empty okNotSentBers when historical notification exists" in {
     val pubSubStream = testStreamOf[MyEventRecord]
       .advanceWatermarkTo(new Instant(0))
       .addElements(not_sent_debit_quique)
@@ -177,7 +152,7 @@ class MediationServiceSpec extends PipelineSpec {
     }
   }
 
-  "duplicated GCS_BERs without distinctByKey" should "throw Exception" in {
+  "duplicated historical notifications without distinctByKey" should "throw Exception due to SideInput lookup" in {
     val pubSubStream = testStreamOf[MyEventRecord]
       .advanceWatermarkTo(new Instant(0))
       .addElements(not_sent_debit_quique)

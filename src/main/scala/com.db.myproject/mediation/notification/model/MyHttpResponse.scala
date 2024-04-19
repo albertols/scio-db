@@ -8,18 +8,20 @@ object MyHttpResponse extends DefaultJsonProtocol with SprayJsonSupport {
 
   val NOT_HTTP_RESPONSE = 0
 
-  def koNotificationResponse(exceptionDescr: String) =
+  val SENT_OR_DUPLICATED: NotificationResponse = emptyNotificationResponse(NHUBResultEnum.NHUB_NOT_ATTEMPTED_ALREADY_SENT_OR_DUPLICATED)
+
+  def koNotificationResponse(exceptionDescr: String): NotificationResponse =
     NotificationResponse(NOT_HTTP_RESPONSE, "", NHUBResultEnum.NHUB_KO.toString, 0)
 
-  def emptyNotificationResponse(nHUBResultEnum: NHUBResultEnum.Value) =
+  def emptyNotificationResponse(nHUBResultEnum: NHUBResultEnum.Value): NotificationResponse =
     NotificationResponse(NOT_HTTP_RESPONSE, "", nHUBResultEnum.toString, 0)
 
-  def isSuccessAndFullResultDescr(response: NotificationResponse) = {
+  def isSuccessAndFullResultDescr(response: NotificationResponse): (Boolean, String) = {
     val fullDescr = response.body
     val success = fullDescr.toLowerCase match {
       case x if x.contains("error") => false
-      case x if x.contains("ko")    => false
-      case _                        => true
+      case x if x.contains("ko") => false
+      case _ => true
     }
     (success, fullDescr)
   }
