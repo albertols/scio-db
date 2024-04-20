@@ -1,9 +1,7 @@
 package com.db.myproject.mediation.testing
 
-import com.db.myproject.mediation.avro._
 import com.db.myproject.mediation.avro.MyEventRecordUtils.newEventRecordWithSuccess
-
-import scala.collection.JavaConverters._
+import com.db.myproject.mediation.avro._
 
 object NotificationsMockData {
   val not_sent_debit_quique: MyEventRecord = {

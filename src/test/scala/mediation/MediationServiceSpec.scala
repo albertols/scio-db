@@ -51,7 +51,7 @@ class MediationServiceSpec extends PipelineSpec {
       .addElements(event(not_sent_debit_quique, Duration.standardSeconds(1)))
       // advance the watermark
       .advanceWatermarkTo(baseTime.plus(Duration.standardSeconds(10)))
-      // duplicated elements
+      // x 2 duplicated elements
       .addElements(event(not_sent_debit_quique, Duration.standardSeconds(5)))
       .addElements(event(not_sent_debit_quique, Duration.standardSeconds(1)))
       .advanceWatermarkToInfinity

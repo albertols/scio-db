@@ -4,11 +4,11 @@ import com.db.myproject.mediation.MediationService.INITIAL_LOAD_PREFIX
 import com.db.myproject.mediation.avro.MyEventRecordUtils.{getIdempotentNotificationKey, newEventRecordWithRetryIncrement}
 import com.db.myproject.mediation.configs.MediationConfig
 import com.db.myproject.mediation.http.StateAndTimerType.{InputBer, KVInputStringAndBer, KVOutputBerAndHttpResponse}
-import com.db.myproject.mediation.http.clients.zio.ZioHttpClient
 import com.db.myproject.mediation.http.clients.AbstractHttpClient
 import com.db.myproject.mediation.http.clients.akka.AkkaHttpClient
+import com.db.myproject.mediation.http.clients.zio.ZioHttpClient
 import com.db.myproject.mediation.http.state.StateScalaAsyncDoFn
-import com.db.myproject.mediation.notification.model.MyHttpResponse.{NHUBResultEnum, SENT_OR_DUPLICATED, emptyNotificationResponse, koNotificationResponse}
+import com.db.myproject.mediation.notification.model.MyHttpResponse.{SENT_OR_DUPLICATED, koNotificationResponse}
 import com.spotify.scio.transforms.DoFnWithResource.ResourceType
 import org.apache.beam.sdk.state.{BagState, Timer}
 import org.apache.beam.sdk.transforms.DoFn

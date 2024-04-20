@@ -15,6 +15,8 @@ import org.slf4j.{Logger, LoggerFactory}
  * Exception: using DataFlowRunner throws "java.lang.ClassCastException" when reading from avro GCS interim files (from BQ)
  * https://stackoverflow.com/questions/76267480/scio-dataflow-error-message-from-worker-java-lang-classcastexception-class-ca
  *
+ * due to this issue: https://github.com/spotify/scio/issues/4938
+ *
  * Background:
  * 1) main PubSub joins PubSub Side input with FixedWindows: https://spotify.github.io/scio/examples/RefreshingSideInputExample.scala.html
  * 2) GlobalWindow SideInput for lookups: https://beam.apache.org/documentation/patterns/side-inputs/#slowly-updating-global-window-side-inputs
