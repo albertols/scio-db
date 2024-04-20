@@ -6,7 +6,7 @@ Apache Beam SCIO repo for:
 
 # Applications
 ## MediationService
-[MediationsService README.md](src/main/scala/com.db.myproject/mediation/README.md)
+[MediationService README.md](src/main/scala/com.db.myproject/mediation/README.md)
 
 
 ## Intellij Plugins

@@ -10,7 +10,7 @@ import com.spotify.scio.avro._
 import com.spotify.scio.values.SCollection
 
 /**
- * TO BE IMPROVED: internal local tooling for quickly generating
+ * TO BE IMPROVED: internal local tooling for quickly generating avro dumps for integration testing
  */
 object LocalAvroDump {
   def main(cmdlineArgs: Array[String]): Unit = {
