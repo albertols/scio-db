@@ -17,7 +17,42 @@
 
 ## Introduction
 
-- Medium Post:
+- Medium Post: TBD
+
+Duplicate data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
+stage (rebalancing still coming about), reprocessing from host DB2, failed ACK in microservice to PubSub, etc. Sometimes
+it is just okay to deal with them, but your eye pupil can get into proper autofocus mode after some
+duplicated DEBIT or BILLS push notifications are just popping up on your smartphone's scree, not cool at all...
+
+At some point in your pipeline you must drop the duplicated processed data or prevent them from being sent at least, but
+what about if you have sent millions of notifications already sent, besides you need to face a high throughput of pushes
+to be
+delivered (end of the month bills, black friday) and low latency to be resolved before being sent... SOLUTION? you need
+to keep state externally or maybe
+internally...¿?
+
+Internally you can easily face issues and out of memory headaches and keeping the state in
+distributed nodes can be challenging. Vertical scalability is actually available in DataFlow Prime, let's explore other
+options.
+
+Externally you have some DB like HBase (BigTable), Cache (Redis, Memorystore), In Memory Data Grid (IMDG Hazelcast),
+etc...
+Each of them have different pros and cons (not the purpose of this post), but the main drawback on the cloud you can
+guess it: COST. Furthermore, if you
+need to deploy Regional or Multi-Regional instances, this cost will proportionally increase.
+
+Some of you can be familiar with _mapWithState_ in SparkStreaming, keeping state of elements among windows. Apache Beam
+has also a really cool pattern https://beam.apache.org/blog/timely-processing/ called State and Timer (S & T) widely
+used in the industry and with some interesting underlying infrastructure when using the DataFlow runner, I will
+encourage to go through some of the Beam Summit talks in the last section.
+This looks like a good fit... but:
+
+- how would it be possible using a S & T through an Async ParDo? how would we attach a HTTP Client? how would it scale?
+- how can we achieve this using SCIO Scala for Apache Beam?
+- would this be cheaper than managing infrastructure, replicas, reloading historical notifications? which limitations do
+  we have with streaming, windows and S & T?
+
+If you want to figure some of these questions out, this is your place.
 
 ## Design
 
