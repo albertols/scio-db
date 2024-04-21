@@ -18,7 +18,7 @@
 
 ## Introduction
 
-We must migrate an on premise microservice (mediation-service) that:
+We must migrate an on premise microservice (mediation-service) application that:
 
 - is implemented in Spring (living in Openshift).
 - reads: records from Kafka.
