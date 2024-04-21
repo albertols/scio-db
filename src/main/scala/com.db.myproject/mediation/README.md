@@ -41,7 +41,7 @@
 
 This diagram represents the ingestion and processing flow of the BER notifications, from ingestion to delivery the HTTP
 endpoint through its state management within the S & T:
-[mediation_design.png](../../../../../docs/mediation/mediation_design.png)
+![mediation_design.png](../../../../../docs/mediation/mediation_design.png)
 1. Reading **historical_notifications** from Google Cloud Storage (GCS)
 2. Reading **new_notifications** from PubSub
 3. Treating **historical_notifications**, _SideInput approach is taken_ (as long as TTL is applied) for discarding
