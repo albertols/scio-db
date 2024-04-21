@@ -20,37 +20,43 @@
 - Medium Post: TBD
 
 Duplicate data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
-stage (rebalancing still coming about), reprocessing from host DB2, failed ACK in a microservice publishing  into PubSub, etc. Sometimes
+stage (rebalancing still coming about), reprocessing old transactions by mistake from your origin (e.g: with a
+ChangeDataCapture from DB2), failed ACK in a microservice when publishing into PubSub, and so on. Sometimes
 it is just okay to deal with them, but your eye pupil can get into proper autofocus mode after some
 duplicated DEBIT or BILLS push notifications are just popping up on your smartphone's screen, not cool at all...
 
 At some point in your pipeline you must drop the duplicated processed data or prevent them from being sent at least, but
 what about if you have sent millions of notifications already sent, besides you need to face a high throughput of pushes
 to be
-delivered (end of the month bills, black friday) and low latency to be resolved before being sent... **SOLUTION**? you need
+delivered (end of the month bills, black friday, holidays, etc) and low latency to be resolved before being sent...
+*SOLUTION*? you need
 to keep state externally or maybe
 internally...¿?
 
-Internally you can easily face issues and out of memory headaches and keeping the state in
-distributed nodes can be challenging. Vertical scalability is actually available in DataFlow Prime, let's explore other
+Internally you can easily face issues, out of memory headaches and keeping the state in
+distributed nodes can be challenging. Vertical scalability is actually available in DataFlow Prime, but let's explore
+other
 options.
 
-Externally you have some DB like HBase (BigTable), Cache (Redis, Memorystore), In Memory Data Grid (IMDG Hazelcast),
+Externally you have some databases widely used in the distributed world like Cassandra, HBase (BigTable), Cache (Redis,
+Memorystore), In Memory Data Grid (IMDG Hazelcast),
 etc...
 Each of them have different pros and cons (not the purpose of this post), but the main drawback on the cloud you can
 guess it: COST. Furthermore, if you
 need to deploy Regional or Multi-Regional instances, this cost will proportionally increase.
 
 Some of you can be familiar with _mapWithState_ in SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html), keeping state of elements among windows. Apache Beam
-has also a really cool pattern https://beam.apache.org/blog/timely-processing/ called State and Timer (S & T) widely
+has also a really cool and more powerful pattern https://beam.apache.org/blog/timely-processing/ called State and
+Timer (S & T) widely
 used in the industry and with some interesting underlying infrastructure when using the DataFlow runner, I will
-encourage to go through some of the Beam Summit talks in the last section.
+encourage to go through some of the Beam Summit talks in the last section and figure it out.
 This looks like a good fit... but:
 
 - how would it be possible using a S & T through an Async ParDo? how would we attach a HTTP Client? how would it scale?
 - how can we achieve this using SCIO Scala for Apache Beam?
-- would this be cheaper than managing infrastructure, replicas, reloading historical notifications? which limitations do
-  we have with streaming, windows and S & T?
+- would this be cheaper than managing infrastructure, replicas, reloading historical notifications after a new node is
+  up or shutdown? which limitations are we facing with streaming, windowing and S & T when asynchronous HTTP calls are
+  involved?
 
 If you want to figure some of these questions out, this is your place.
 
@@ -62,8 +68,7 @@ If you want to figure some of these questions out, this is your place.
   also known as _BusinessEventRecord_ (BER, if
   you come across this acronym, sorry, this is an open source adaptation of a productive DataFlow application)
 - applying State (as idempotent_key in BagState) and Timer, avoiding duplicates with same idempotent_key as long as the
-  Timer
-  is not flushed (acting as TTL).
+  Timer is not flushed (acting as TTL).
 
 ## Modelling
 
@@ -83,10 +88,12 @@ endpoint through its state management within the S & T:
    duplicates from **new_notifications**
    against **historical_notifications**.
 
-> HINT: A unionAll with Bounded (GCS) and Unbounded (PubSub), has been discarded, as it stalls the process (only first
-> emitted Pane) and GroupByKey
-(GBK) when applying state (for State And Timer), when using GlobalWindow (maybe trying other Triggers). Potential
-> option, reloading **historical_notifications** into PubSub and loading into the State and Timer
+> NOTE: A unionAll with Bounded "historical" (GCS) and Unbounded "fresh" (PubSub), has been discarded, as it stalls the
+> process (only first
+> emitted Pane from PubSub is emitted) despite GroupByKey
+(GBK) when applying state (for State And Timer), and using GlobalWindow (other Triggers were included but only first
+> Pane Pubsub records were shown). A potential option might be reloading **historical_notifications** into PubSub and
+> loading into the State and Timer, thus, all new notifications and historical will be unbounded.
 
 4. KO inValidBers as toxic in GCS
 5. Saving attempted BERs (new_notifications) in KV as State and release them when Timer expires (TTL): avoiding
@@ -234,7 +241,7 @@ notifications saved as "ttl" State:
 Bearing in mind that the same Mock data sets have been used in all scenarios, it is worth noting (with all e2 family GCE
 machine type):
 
-- e2-highcpu-4: scaling was needed (maxWorkers=3).
+- e2-highmem-4: scaling was needed (maxWorkers=3).
 - e2-standard-4: we got good balance between scalability, latency and cost. Scaling was not needed.
 - e2-highcpu-4: we got some OutOfMemory issues (restarting a worker), it did handle the load but with the worst
   performance.
