@@ -1,6 +1,7 @@
 # mediation-service
 
 - [Introduction](#Introduction)
+- [DataFlow_Assessment](#DataFlow_Assessment)
 - [Design](#Design)
 - [Modelling](#Modelling)
 - [Flow](#Flow)
@@ -17,38 +18,56 @@
 
 ## Introduction
 
+We must migrate an on premise microservice (mediation-service) that:
+
+- is implemented in Spring (living in Openshift).
+- reads: records from Kafka.
+- output: HTTP Requests to a notification hub endpoint.
+- keeps state (historical results) in a In Memory Data Grid (IMDG) Hazelcast cluster (living in Openshift).
+- scales horizontally increasing its number of PODs.
+
+> NOTE: we do not have a Hazelcast Enterprise cluster due to extra cost avoidance. Thus, on top of the hazelcast
+> cluster we need an extra "storage logic layer", as PVC in Kuberentes or as decoupled topic layer in Kafka to
+> repopullate
+> the state, when a disaster recovery or mainteance restart in new regions come about. This is managed by a
+> hazelcast-manager microservice.
+
+Could this design be simplified when migrating into GCP? could we use a distributed Big Data processing engine like
+DataFlow to undertake massive Async Http Requests? what about keeping the state of this sent Http Requests to avoid
+duplicates?
+Let's move on to the next section.
+
+## DataFlow_Assessment
+
 - Medium Post: TBD
 
-Duplicate data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
+Duplicated data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
 stage (rebalancing still coming about), reprocessing old transactions by mistake from your origin (e.g: with a
-ChangeDataCapture from DB2), failed ACK in a microservice when publishing into PubSub, and so on. Sometimes
-it is just okay to deal with them, but your eye pupil can get into proper autofocus mode after some
-duplicated DEBIT or BILLS push notifications are just popping up on your smartphone's screen, not cool at all...
+ChangeDataCapture from DB2), failed ACK in a microservice when publishing into PubSub, and so on. Sometimes it is okay
+to deal with them, but your pupils can get into proper autofocus mode after some
+duplicated DEBIT or BILLS push notifications that are just popping up on your smartphone's screen, not cool at all…
 
 At some point in your pipeline you must drop the duplicated processed data or prevent them from being sent at least, but
-what about if you have sent millions of notifications already sent, besides you need to face a high throughput of pushes
-to be
-delivered (end of the month bills, black friday, holidays, etc) and low latency to be resolved before being sent...
-*SOLUTION*? you need
-to keep state externally or maybe
-internally...¿?
+what about if you have sent millions of notifications already? In addition, you need to face a high throughput of pushes
+to be delivered (end of the month bills, black friday, holidays, etc) and low latency to be resolved before being sent…
+SOLUTION? You need to keep the state externally or maybe internally…???
 
-Internally you can easily face issues, out of memory headaches and keeping the state in
-distributed nodes can be challenging. Vertical scalability is actually available in DataFlow Prime, but let's explore
-other options.
+Internally you can easily face issues, such as out of memory headaches and keeping the state in distributed nodes, all
+can be challenging. Vertical scalability is actually available in DataFlow Prime, but let's explore other options.
 
 Externally you have some databases widely used in the distributed world like Cassandra, HBase (BigTable), Cache (Redis,
-Memorystore), In Memory Data Grid (IMDG Hazelcast),
-etc...
-Each of them have different pros and cons (not the purpose of this post), but the main drawback on the cloud you can
-guess it: COST. Furthermore, if you
-need to deploy Regional or Multi-Regional instances, this cost will proportionally increase.
+Memorystore), In Memory Data Grid (IMDG Hazelcast), etc… Each of them have different pros and cons (not the purpose of
+this post), but the main drawback on the cloud, I am sure you can guess: COST. Furthermore, if you need to deploy
+Regional or Multi-Regional instances this cost will proportionally increase.
 
-Some of you can be familiar with _mapWithState_ in SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html), keeping state of elements among windows. Apache Beam
-has also a really cool and more powerful pattern https://beam.apache.org/blog/timely-processing/ called State and
-Timer (S & T) widely
-used in the industry and with some interesting underlying infrastructure when using the DataFlow runner, I will
-encourage to go through some of the Beam Summit talks in the last section and figure it out.
+Some of you may be familiar with mapWithState in
+SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html),
+keeping the state of elements among windows. Apache Beam has also a really cool and more powerful
+pattern https://beam.apache.org/blog/timely-processing/ called State and
+Timer (S & T) widely used in the industry and with some interesting underlying infrastructure when using the DataFlow
+runner. I would
+encourage you to go through some of the Beam Summit talks in the last section to figure it out.
+
 This looks like a good fit... but:
 
 - how would it be possible using a S & T through an Async ParDo? how would we attach a HTTP Client? how would it scale?
@@ -57,7 +76,7 @@ This looks like a good fit... but:
   up or shutdown? which limitations are we facing with streaming, windowing and S & T when asynchronous HTTP calls are
   involved?
 
-If you want to figure some of these questions out, this is your place.
+If you want to figure some of these questions out, you are in the right place.
 
 ## Design
 
@@ -83,8 +102,8 @@ If you want to figure some of these questions out, this is your place.
 
 ## Flow
 
-This diagram represents the ingestion and processing flow of the BER notifications, from ingestion to delivery the HTTP
-endpoint through its state management within the S & T:
+This diagram represents the ingestion and processing flow of the BER notifications, from ingestion to delivery to the
+HTTP endpoint through its state management within the S & T:
 ![mediation_design.png](../../../../../docs/mediation/mediation_design.png)
 
 1. Reading **historical_notifications** from Google Cloud Storage (GCS) as OPTION 1. OPTION 2, from PubSub, alternative
@@ -103,35 +122,32 @@ endpoint through its state management within the S & T:
 > process (only first
 > emitted Pane from PubSub is emitted) despite GroupByKey
 (GBK) when applying state (for State And Timer), and using GlobalWindow (other Triggers were included but only first
-> Pane Pubsub records were shown). As mentioned in point 1), potential OPTION 2, might be useful when reloading
+> Pane Pubsub records were shown). As mentioned in point 1, potential OPTION 2, might be useful when reloading
 **historical_notifications** into PubSub and
 > then loading them into the State and Timer, thus, all new notifications and historical will be wrapped seemingly as
 > "unbounded", applying S & T for **historical_notifications**.
 
 3. applyKVState to Flush Futures. Saving attempted notifications BERs (new_notifications) in KV as State and release
-   them when Timer expires (TTL):
-   avoiding duplicates (
-   race conditions are mitigated as distinctByKey is previously applied)
-4. checks if they have been already processed and keeps state by idempotent key, add Future
-    - 4.1: processElement (ParDo) in _StateBaseAsyncDoFn_.
-    - 4.2: _StateAsyncParDoWithHttpHandler_: sending HTTP request.
-    - 4.3: flush() in _StateBaseAsyncDoFn_: Future [Http Response] is asynchronous and _StateBaseAsyncDoFn_ will deal
-      with it (outputting to
-      main routine)
-5. output HTTP Response is emitted in the main routine
-6. now you can save your HTTP Response/NOTIFICATION_RESPONSE along with the "sent" **new_notification** in PubSub (e.g:
+   them when Timer expires (TTL): avoiding duplicates (race conditions are mitigated as _distinctByKey_ is previously
+   applied)
+4. Checks if the **new_notifications** have been already processed and keeps state by idempotent key, add Future
+    - 4.1: processElement (ParDo) in _StateBaseAsyncDoFn.java_.
+    - 4.2: _StateAsyncParDoWithHttpHandler.scala_: sending HTTP request.
+    - 4.3: flush() in _StateBaseAsyncDoFn.java_: Future [Http Response] is asynchronous and _StateBaseAsyncDoFn.java_
+      will deal with it (outputting to main routine).
+5. Output HTTP Response is emitted in the main routine.
+6. Now you can save your HTTP Response/NOTIFICATION_RESPONSE along with the "sent" **new_notification** in PubSub (e.g:
    sinking in GCS eventually, useful for analytics as external table
-   besides the historical load as
-   *historical_notifications* if mediation-service is restarted)
+   alongside the historical load as
+   *historical_notifications* if mediation-service is restarted).
 
 ## Implementation
 ### StateBaseAsyncDoFn
 
-This class is mainly based on the implementation of SCIO's
+This class [StateBaseAsyncDoFn](http/state/StateBaseAsyncDoFn.java) is mainly based on the implementation of SCIO's
 _BaseAsyncDoFn_ https://github.com/spotify/scio/blob/main/scio-core/src/main/java/com/spotify/scio/transforms/BaseAsyncDoFn.java
-abstracting out some methods and adding a Timer(ttl) along with a BagState (buffer), all needed to use the S & T
-pattern,
-preventing duplicated HTTP Requests from being sent:
+but abstracting out some methods, adding a Timer(TTL) along with a BagState (buffer). All of these are needed to use the
+S & T pattern, preventing duplicated HTTP Requests from being sent:
 
 ```
     public void processElement(
@@ -173,22 +189,21 @@ com.google.common.cache.Cache, having it for handling TTL. Although, a concern h
 DataFlow Vertical autoscaling feature might come into place, tackling ingestion peaks.
 
 This SCIO caching capability along with a workaround for adding something similar to
-this [StateAsyncParDoWithHttpHandler](#StateAsyncParDoWithHttpHandler) using a S & T pattern, has been discussed as
-potential future
-enhancement here: https://github.com/spotify/scio/issues/5055.
+this [StateAsyncParDoWithHttpHandler](#StateAsyncParDoWithHttpHandler) using a S & T pattern, has been discussed as a
+potential future enhancement here: https://github.com/spotify/scio/issues/5055.
 
 ### HTTPClient
 
-"Bring your HTTP Client", like akka or zio here: [clients](http/clients). Implement it
+"Bring your own HTTP Client", like akka or zio here: [clients](http/clients). Implement it
 as [AbstractHttpClient](http/clients/AbstractHttpClient.scala) and you can include it as **httpClient**:
 ```
-  lazy val httpClient = {
-    mediationConfig.mediation.httpClientType match {
-      case "akka" => new AkkaHttpClient
-      case "zio"  => new ZioHttpClient
-      case "yourHttpClient"  => new YourHttpClient
-    }
+lazy val httpClient = {
+  mediationConfig.mediation.httpClientType match {
+    case "akka" => new AkkaHttpClient
+    case "zio"  => new ZioHttpClient
+    case "yourHttpClient"  => new YourHttpClient
   }
+}
 ```
 
 within the [StateAsyncParDoWithHttpHandler](http/StateAsyncParDoWithHttpHandler.scala)
@@ -203,7 +218,7 @@ This is the current implementation: [AkkaHttpClient](http/clients/akka/AkkaHttpC
 ### ZIORetry
 
 Some retry mechanism has been implemented using ZIO retry for Scala: https://zio.dev/reference/schedule/retrying/, so
-that, we can avoid Dead Letter Queuing or Retry topic patterns. Retry is achieved at process level as shown below:
+that we can avoid Dead Letter Queuing or Retry topic patterns. Retry is achieved at process level as shown below:
 
 ```
   def sendPushWithRetryZio(
@@ -241,10 +256,11 @@ that, we can avoid Dead Letter Queuing or Retry topic patterns. Retry is achieve
 > workaround https://cloud.google.com/pubsub/docs/emulator#pubsub-emulator-java. I have not got it sorted (yet). In the
 > meantime we can just get by with TestStream.
 
-## StressTests
+### StressTests
 
 Some "Stress testing" has been undertaken with Mock data sets (with different _idempotent_key_), peaking more than +200K
-notifications / min with the current AkkaHttpClient config, forcing the application to scale up and keeping some million
+notifications / min with the current AkkaHttpClient config, forcing the application to scale up and keeping
+approximately a million
 of
 notifications saved as "ttl" State:
 
@@ -271,16 +287,16 @@ machine type):
 
 ## Background
 
-Here it comes some inspiration and guidance for this project, coming mainly for previous Beam Summits:
+Here it comes, some inspiration and guidance for this project, coming mainly from previous Beam Summits:
 
-- intro to State and Timer (from Beam Summit 2019) https://www.youtube.com/watch?v=Q_v5Zsjuuzg
-- great intro to SCIO Beam (from Beam Summit 2021) https://github.com/iht/scio-scala-beam-summit
+- Intro to State and Timer (from Beam Summit 2019) https://www.youtube.com/watch?v=Q_v5Zsjuuzg
+- Great intro to SCIO Beam (from Beam Summit 2021) https://github.com/iht/scio-scala-beam-summit
 - State and Timer (from Beam Summit 2023)
   https://beamsummit.org/sessions/2023/too-big-to-fail-a-beam-pattern-for-enriching-a-stream-using-state-and-timers/
 - Unbreakable & Supercharged Beam Apps with Scala + ZIO (from Beam Summit
   2023)https://beamsummit.org/sessions/2023/unbreakable-supercharged-beam-apps-with-scala-zio/
 
-by these Beam Summit contributors:
+By these Beam Summit contributors:
 
 - Kenneth Knowles: https://beamsummit.org/speakers/kenneth-knowles/
 - Reza Rokni: https://2021.beamsummit.org/speakers/reza-rokni/
