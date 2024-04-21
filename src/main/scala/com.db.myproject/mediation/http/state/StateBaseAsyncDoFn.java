@@ -72,13 +72,13 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
             OutputReceiver<OutputT> out,
             BoundedWindow window) {
         flush(out);
-        settingElementTTLTimer(buffer, ttl, element);
-        initialLoad(buffer, element, ttl);
+        settingElementTTLTimer(buffer, ttl, element); // abstract
+        initialLoad(buffer, element, ttl); // abstract
 
-        if (!alreadySentOrLoaded(buffer, element, ttl))
+        if (!alreadySentOrLoaded(buffer, element, ttl)) // abstract
             try {
                 final UUID uuid = UUID.randomUUID();
-                addIdempotentElementInBuffer(buffer, element);// WATCH OUT: potential race conditions
+                addIdempotentElementInBuffer(buffer, element);// abstract, WATCH OUT: potential race conditions
                 final FutureT future = processElement(element);
                 futures.put(uuid, handleOutput(future, element, buffer, uuid, timestamp, window));
             } catch (Exception e) {
@@ -86,7 +86,7 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
                 throw e;
             }
         else
-            outputAlreadySentOrLoaded(element, out);
+            outputAlreadySentOrLoaded(element, out); // abstract
     }
 
     protected abstract void outputAlreadySentOrLoaded(InputT element, OutputReceiver<OutputT> out);
