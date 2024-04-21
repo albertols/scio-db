@@ -35,8 +35,7 @@ internally...¿?
 
 Internally you can easily face issues, out of memory headaches and keeping the state in
 distributed nodes can be challenging. Vertical scalability is actually available in DataFlow Prime, but let's explore
-other
-options.
+other options.
 
 Externally you have some databases widely used in the distributed world like Cassandra, HBase (BigTable), Cache (Redis,
 Memorystore), In Memory Data Grid (IMDG Hazelcast),
@@ -67,7 +66,8 @@ If you want to figure some of these questions out, this is your place.
   https client for reaching an endpoint (e.g: https://jsonplaceholder.typicode.com/guide/) sending _MyEventRecord_,
   also known as _BusinessEventRecord_ (BER, if
   you come across this acronym, sorry, this is an open source adaptation of a productive DataFlow application)
-- applying State (as idempotent_key in BagState) and Timer, avoiding duplicates with same idempotent_key as long as the
+- applying State (as _idempotent_key_ in BagState) and Timer, avoiding duplicates with same _idempotent_key_ as long as
+  the
   Timer is not flushed (acting as TTL).
 
 ## Modelling
@@ -75,31 +75,54 @@ If you want to figure some of these questions out, this is your place.
 1. Using Avro (as new/historical
    notifications): [MyEventRecord](avro/MyEventRecord.java)
 2. HTTPResponse and HTTPRequest: [notification.model](notification/model)
+3. _idempotent_key_: [MyEventRecordUtils](avro/MyEventRecordUtils.scala)
 
+```
+  def getIdempotentNotificationKey(record: MyEventRecord) = s"${record.getEvent.getTransactionId}-${record.getCustomer.getId}"
+```
 
 ## Flow
 
 This diagram represents the ingestion and processing flow of the BER notifications, from ingestion to delivery the HTTP
 endpoint through its state management within the S & T:
 ![mediation_design.png](../../../../../docs/mediation/mediation_design.png)
-1. Reading **historical_notifications** from Google Cloud Storage (GCS)
-2. Reading **new_notifications** from PubSub
-3. Treating **historical_notifications**, _SideInput approach is taken_ (as long as TTL is applied) for discarding
-   duplicates from **new_notifications**
-   against **historical_notifications**.
 
-> NOTE: A unionAll with Bounded "historical" (GCS) and Unbounded "fresh" (PubSub), has been discarded, as it stalls the
+1. Reading **historical_notifications** from Google Cloud Storage (GCS) as OPTION 1. OPTION 2, from PubSub, alternative
+   one (to be implemented)
+2. Ingestion and pre S & T Flow. Notifications (BERs) are Globally windowed and keyed by _idempotent_key_
+    - 2.1: Reading **new_notifications** from PubSub
+    - 2.2: Treating **historical_notifications**, _SideInput approach is taken_ (as long as TTL is applied) for
+      discarding duplicates from **new_notifications** against **historical_notifications**.
+    - 2.3: KO inValidBers as toxic in GCS
+
+> NOTE 1: make sure you can fit in all **historical_notifications** from GCS as SideInput in your workers, allocating
+> enough memory
+
+> NOTE 2: A unionAll with Bounded "historical" (GCS) and Unbounded "fresh" (PubSub), has been discarded, as it stalls
+> the
 > process (only first
 > emitted Pane from PubSub is emitted) despite GroupByKey
 (GBK) when applying state (for State And Timer), and using GlobalWindow (other Triggers were included but only first
-> Pane Pubsub records were shown). A potential option might be reloading **historical_notifications** into PubSub and
-> loading into the State and Timer, thus, all new notifications and historical will be unbounded.
+> Pane Pubsub records were shown). As mentioned in point 1), potential OPTION 2, might be useful when reloading
+**historical_notifications** into PubSub and
+> then loading them into the State and Timer, thus, all new notifications and historical will be wrapped seemingly as
+> "unbounded", applying S & T for **historical_notifications**.
 
-4. KO inValidBers as toxic in GCS
-5. Saving attempted BERs (new_notifications) in KV as State and release them when Timer expires (TTL): avoiding
-   duplicates (race conditions
-   are mitigated as distinctByKey is previously applied). Then, **new_notifications** are sent through your HTTP client.
-6. Saving NOTIFICATION_RESPONSE in PubSub (e.g: for analytics as external table, as **historical_notifications**)
+3. applyKVState to Flush Futures. Saving attempted notifications BERs (new_notifications) in KV as State and release
+   them when Timer expires (TTL):
+   avoiding duplicates (
+   race conditions are mitigated as distinctByKey is previously applied)
+4. checks if they have been already processed and keeps state by idempotent key, add Future
+    - 4.1: processElement (ParDo) in _StateBaseAsyncDoFn_.
+    - 4.2: _StateAsyncParDoWithHttpHandler_: sending HTTP request.
+    - 4.3: flush() in _StateBaseAsyncDoFn_: Future [Http Response] is asynchronous and _StateBaseAsyncDoFn_ will deal
+      with it (outputting to
+      main routine)
+5. output HTTP Response is emitted in the main routine
+6. now you can save your HTTP Response/NOTIFICATION_RESPONSE along with the "sent" **new_notification** in PubSub (e.g:
+   sinking in GCS eventually, useful for analytics as external table
+   besides the historical load as
+   *historical_notifications* if mediation-service is restarted)
 
 ## Implementation
 ### StateBaseAsyncDoFn
@@ -220,7 +243,7 @@ that, we can avoid Dead Letter Queuing or Retry topic patterns. Retry is achieve
 
 ## StressTests
 
-Some "Stress testing" has been undertaken with Mock data sets (with different idempotent_key), peaking more than +200K
+Some "Stress testing" has been undertaken with Mock data sets (with different _idempotent_key_), peaking more than +200K
 notifications / min with the current AkkaHttpClient config, forcing the application to scale up and keeping some million
 of
 notifications saved as "ttl" State:

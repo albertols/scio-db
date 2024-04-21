@@ -52,6 +52,7 @@ class StateAsyncParDoWithHttpHandler(mediationConfig: MediationConfig, applyInit
   override def processElement(
     input: StateAndTimerType.KVInputStringAndBer
   ): StateAndTimerType.FutureKVOutputBerAndHttpResponse =
+    // STEP 4.2)
     Try(mediationConfig.mediation.retryNotifications match {
       case true  => sendPushWithRetryZio(input.getValue)
       case false => getResource.sendPushWithFutureResponse(input.getValue)

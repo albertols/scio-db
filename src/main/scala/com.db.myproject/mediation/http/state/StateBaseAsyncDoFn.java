@@ -60,8 +60,10 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
                 new RuntimeException("Failed to process futures", e);
             }
         }
+        // STEP 4.3)
         flush(context);
     }
+
 
     @ProcessElement
     public void processElement(
@@ -80,6 +82,7 @@ public abstract class StateBaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
                 final UUID uuid = UUID.randomUUID();
                 addIdempotentElementInBuffer(buffer, element);// abstract, WATCH OUT: potential race conditions
                 final FutureT future = processElement(element);
+                // STEP 4.1)
                 futures.put(uuid, handleOutput(future, element, buffer, uuid, timestamp, window));
             } catch (Exception e) {
                 LOG.error("Failed to process element", e);

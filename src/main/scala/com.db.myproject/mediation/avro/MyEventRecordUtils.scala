@@ -6,7 +6,7 @@ import org.slf4j.{Logger, LoggerFactory}
 
 /**
  * Contains some methods "newBer" for workarounds due to: org.apache.beam.sdk.util.IllegalMutationException: PTransform
- * map@{53}:2/ParMultiDo(Anonymous) illegaly mutated value
+ * map@{53}:2/ParMultiDo(Anonymous) illegally mutated value
  */
 object MyEventRecordUtils {
 

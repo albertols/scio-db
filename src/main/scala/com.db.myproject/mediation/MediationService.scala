@@ -70,7 +70,7 @@ object MediationService {
 
   def main(cmdlineArgs: Array[String]): Unit = {
     try {
-      // 1) Init Context and config
+      // 0) Init Context and config
       log.info("Init SCIO Context...")
       val (sc, args) = ContextAndArgs(cmdlineArgs)
       implicit val scioContext: ScioContext = sc
@@ -85,7 +85,7 @@ object MediationService {
       // val windowType: String = args.getOrElse("window-type", "global")
       log.info(s"mediationConfig=$mediationConfig")
 
-      // 2) Loading "historical" notifications from GCS (result from YOUR_ENDPOINT, e.g: last 7 days)
+      // STEP 1) Loading "historical" notifications from GCS (result from YOUR_ENDPOINT, e.g: last 7 days)
       val optionalOldBers =
         if (initialLoad)
           getOldAvrosFromGCS(
@@ -95,10 +95,10 @@ object MediationService {
           )
         else None
 
-      // 3) new avro "fresh" notifications
+      // STEP 2.1) new avro "fresh" notifications
       val avroBers = PubSubConsumer.readGenericAvroScio[MyEventRecord](pubSubAvro, PubsubIO.ReadParam(PubsubIO.Subscription))
 
-      // 4) duplicate prevention
+      // STEP 2) GlobalWindows and idempotent_key for "historical" (GCS) and "new" (PubSub)
       val allDistinctKoAndNotSentBers: (SCollection[MyEventRecord], SCollection[(String, MyEventRecord)]) =
         if (optionalOldBers.isDefined) {
           log.info(s"expiringHistoricalTime=$expiringHistoricalTime")
@@ -113,6 +113,7 @@ object MediationService {
             newBerWithInitalLoadEventId,
             applyDistinctByKey = true
           ).distinctByKey.asMapSingletonSideInput
+          // STEP 2.2) duplicate prevention: new (PubSub) vs historical (GCS)
           getNonDuplicatedNotificationPubSubAndGcs(avroBers, sideGcs)
         } else {
           log.info(s"GCS_BER=EMPTY_HISTORICAL")
@@ -124,12 +125,12 @@ object MediationService {
       val okNotSentBers = allDistinctKoAndNotSentBers._2.distinctByKey.map { record =>
         KV.of(record._1, record._2)
       }
-      // KO in GCS
+      // STEP 2.3) KO in GCS
       val windowedKoBers = toIntervalWindowAndIterable[MyEventRecord](30, koBers)
       windowedKoBers.count.map(koBersCount => log.info(s"sinking in GCSkoBers=$koBersCount"))
       SinkUtils.sinkAvroInGCS[MyEventRecord](windowedKoBers, s"gs://${mediationConfig.gcsBucket}/toxic/")
 
-      // 5) Key & State => HttpResponse
+      // STEP 3) Apply Key & State => before HttpRequest
       okNotSentBers.count.map(okNotSentBersCount => log.info(s"okNotSentBersCount=$okNotSentBersCount"))
       val notificationsForAnalytics = bersAfterHttpResponse(applyBerKVState(berKVState, okNotSentBers))
 
@@ -254,6 +255,7 @@ object MediationService {
     windowedBers: SCollection[KV[String, MyEventRecord]]
   ): SCollection[StateAndTimerType.KVOutputBerAndHttpResponse] = windowedBers.applyTransform(ParDo.of(berKVState))
 
+  // STEP 5)
   def bersAfterHttpResponse(httpResponse: SCollection[StateAndTimerType.KVOutputBerAndHttpResponse]): SCollection[(NotificationResponse, MyEventRecord)] =
     httpResponse
       .map { m =>
