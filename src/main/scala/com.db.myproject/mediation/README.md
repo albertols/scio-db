@@ -16,6 +16,8 @@
 - [StressTests](#StressTests)
 - [Background](#Background)
 
+- Medium Post: TBD
+
 ## Introduction
 
 We must migrate an on premise microservice (mediation-service) application that:
@@ -26,10 +28,10 @@ We must migrate an on premise microservice (mediation-service) application that:
 - keeps state (historical results) in a In Memory Data Grid (IMDG) Hazelcast cluster (living in Openshift).
 - scales horizontally increasing its number of PODs.
 
-> NOTE: we do not have a Hazelcast Enterprise cluster due to extra cost avoidance. Thus, on top of the hazelcast
+> NOTE: we do not have a Hazelcast Enterprise cluster due to extra cost avoidance. Thus, on top of the Hazelcast
 > cluster we need an extra "storage logic layer", as PVC in Kuberentes or as decoupled topic layer in Kafka to
 > repopullate
-> the state, when a disaster recovery or mainteance restart in new regions come about. This is managed by a
+> the state, when a disaster recovery or mainteance restart in new regions come about. This is managed by an additional
 > hazelcast-manager microservice.
 
 Could this design be simplified when migrating into GCP? could we use a distributed Big Data processing engine like
@@ -38,8 +40,6 @@ duplicates?
 Let's move on to the next section.
 
 ## DataFlow_Assessment
-
-- Medium Post: TBD
 
 Duplicated data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
 stage (rebalancing still coming about), reprocessing old transactions by mistake from your origin (e.g: with a
@@ -81,10 +81,11 @@ If you want to figure some of these questions out, you are in the right place.
 ## Design
 
 - based on KV State & Timer (S & T) pattern: https://beam.apache.org/blog/timely-processing/
-- leverages https://spotify.github.io/scio/releases/migrations/v0.8.0-Migration-Guide.html#async-dofns attaching a
-  https client for reaching an endpoint (e.g: https://jsonplaceholder.typicode.com/guide/) sending _MyEventRecord_,
-  also known as _BusinessEventRecord_ (BER, if
-  you come across this acronym, sorry, this is an open source adaptation of a productive DataFlow application)
+- Why SCIO? https://cloud.google.com/blog/products/data-analytics/developing-beam-pipelines-using-scala
+  Leveraging https://spotify.github.io/scio/releases/migrations/v0.8.0Migration-Guide.html#async-dofns attaching a HTTPS
+  client for reaching an endpoint (e.g: https://jsonplaceholder.typicode.com/guide/) and sending _MyEventRecord_, also
+  known as _BusinessEventRecord_ (BER, if you come across this acronym, sorry, this is an open source adaptation of a
+  real-world productive DataFlow application).
 - applying State (as _idempotent_key_ in BagState) and Timer, avoiding duplicates with same _idempotent_key_ as long as
   the
   Timer is not flushed (acting as TTL).
@@ -109,10 +110,10 @@ HTTP endpoint through its state management within the S & T:
 1. Reading **historical_notifications** from Google Cloud Storage (GCS) as OPTION 1. OPTION 2, from PubSub, alternative
    one (to be implemented)
 2. Ingestion and pre S & T Flow. Notifications (BERs) are Globally windowed and keyed by _idempotent_key_
-    - 2.1: Reading **new_notifications** from PubSub
+    - 2.1: Reading **new_notifications** from PubSub.
     - 2.2: Treating **historical_notifications**, _SideInput approach is taken_ (as long as TTL is applied) for
       discarding duplicates from **new_notifications** against **historical_notifications**.
-    - 2.3: KO inValidBers as toxic in GCS
+    - 2.3: KO _inValidBers_ method as toxic notifications in GCS.
 
 > NOTE 1: make sure you can fit in all **historical_notifications** from GCS as SideInput in your workers, allocating
 > enough memory
@@ -280,10 +281,45 @@ notifications saved as "ttl" State:
 Bearing in mind that the same Mock data sets have been used in all scenarios, it is worth noting (with all e2 family GCE
 machine type):
 
-- e2-highmem-4: scaling was needed (maxWorkers=3).
-- e2-standard-4: we got good balance between scalability, latency and cost. Scaling was not needed.
+- e2-highmem-4: scaling was needed (maxWorkers=3 was set up).
+- e2-standard-4: we got good balance between scalability, latency and cost. Scaling was not needed (we got a bit of
+  backlog delay, but bearable from the business perspective).
 - e2-highcpu-4: we got some OutOfMemory issues (restarting a worker), it did handle the load but with the worst
   performance.
+
+## Conclusions
+
+A similar application
+to https://github.com/albertols/scio-db/blob/cleanup-for-medium/src/main/scala/com.db.myproject/mediation/MediationService.scala
+has successfully been deployed on DataFlow in a real-world productive end to end pipeline and replaced:
+- A Spring microservice (on Openshift) that was reading notifications from Kafka and sending them to a HTTP endpoint.
+- An entire multi-node Hazelcast cluster (on Openshift) that was acting as low latency IMDG storage later for
+historical/sent notifications.
+- An additional hazelcast-manager microservice (on Openshift) that was managing an extra "storage logic layer" for the sent
+notifications (realtime) and mantaining historical (in a Kuberentes PVC or Kafka topics) in case of disaster recovery,
+region swapping or Openshift mainteance.
+
+By using a:
+- New developed StateBaseAsyncDoFn.java integrated with a State & Timer pattern, bringing an alternative to keep the state
+instead of "brining your own cache" (Guava). 
+- An abstraction to attach HTTP Clients, "bringing your own HTTP client". 
+- Some (optional) retry mechanism using ZIO.
+
+Allowing:
+
+- High throughput for notification processing and low latency for reading/writing notifications by applying the State and Timer pattern.
+- Great hortizontal scalability.
+- High availaibility and robustness.
+- Huge cost saving, in terms of applications to be mantained, avoiding expensive infrastructure, deployments and operations.
+
+## Future work
+There is a lot more to cover, so more posts might come about soon regarding:
+- Loading historical_notifications within the State & Timer.
+- Brining more HTTP clients options and comparing performance among them.
+- More detailed stress tests.
+- Future similar features in Beam or SCIO core?
+
+Thanks for reading to the end and see you soon!
 
 ## Background
 
