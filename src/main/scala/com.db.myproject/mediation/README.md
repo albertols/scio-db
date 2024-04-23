@@ -27,7 +27,7 @@ We must migrate an on premise microservice (mediation-service) application that:
 - output: HTTP Requests to a notification hub endpoint.
 - keeps state (historical results) in a In Memory Data Grid (IMDG) Hazelcast cluster (living in Openshift).
 - scales horizontally increasing its number of PODs.
-
+![mediation_on_premises.png](../../../../../docs/mediation/mediation_on_premises.png)
 > NOTE: we do not have a Hazelcast Enterprise cluster due to extra cost avoidance. Thus, on top of the Hazelcast
 > cluster we need an extra "storage logic layer", as PVC in Kuberentes or as decoupled topic layer in Kafka to
 > repopullate
@@ -35,7 +35,7 @@ We must migrate an on premise microservice (mediation-service) application that:
 > hazelcast-manager microservice.
 
 Could this design be simplified when migrating into GCP? could we use a distributed Big Data processing engine like
-DataFlow to undertake massive Async Http Requests? what about keeping the state of this sent Http Requests to avoid
+Dataflow to undertake massive Async HTTP Requests? what about keeping the state of this sent Http Requests to avoid
 duplicates?
 Let's move on to the next section.
 
@@ -43,7 +43,7 @@ Let's move on to the next section.
 
 Duplicated data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
 stage (rebalancing still coming about), reprocessing old transactions by mistake from your origin (e.g: with a
-ChangeDataCapture from DB2), failed ACK in a microservice when publishing into PubSub, and so on. Sometimes it is okay
+ChangeDataCapture from DB2), failed ACK in a microservice when publishing into Pubsub, and so on. Sometimes it is okay
 to deal with them, but your pupils can get into proper autofocus mode after some
 duplicated DEBIT or BILLS push notifications that are just popping up on your smartphone's screen, not cool at all…
 
@@ -53,18 +53,18 @@ to be delivered (end of the month bills, black friday, holidays, etc) and low la
 SOLUTION? You need to keep the state externally or maybe internally…???
 
 Internally you can easily face issues, such as out of memory headaches and keeping the state in distributed nodes, all
-can be challenging. Vertical scalability is actually available in DataFlow Prime, but let's explore other options.
+can be challenging. Vertical scalability is actually available in Dataflow Prime, but let's explore other options.
 
-Externally you have some databases widely used in the distributed world like Cassandra, HBase (BigTable), Cache (Redis,
+Externally you have some databases widely used in the distributed world like Cassandra, HBase (Bigtable), Cache (Redis,
 Memorystore), In Memory Data Grid (IMDG Hazelcast), etc… Each of them have different pros and cons (not the purpose of
-this post), but the main drawback on the cloud, I am sure you can guess: COST. Furthermore, if you need to deploy
+this post), but the main drawback on the cloud is, I am sure you can guess: COST. Furthermore, if you need to deploy
 Regional or Multi-Regional instances this cost will proportionally increase.
 
 Some of you may be familiar with mapWithState in
 SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html),
 keeping the state of elements among windows. Apache Beam has also a really cool and more powerful
 pattern https://beam.apache.org/blog/timely-processing/ called State and
-Timer (S & T) widely used in the industry and with some interesting underlying infrastructure when using the DataFlow
+Timer (S & T) widely used in the industry and with some interesting underlying infrastructure when using the Dataflow
 runner. I would
 encourage you to go through some of the Beam Summit talks in the last section to figure it out.
 
@@ -85,7 +85,7 @@ If you want to figure some of these questions out, you are in the right place.
   Leveraging https://spotify.github.io/scio/releases/migrations/v0.8.0Migration-Guide.html#async-dofns attaching a HTTPS
   client for reaching an endpoint (e.g: https://jsonplaceholder.typicode.com/guide/) and sending _MyEventRecord_, also
   known as _BusinessEventRecord_ (BER, if you come across this acronym, sorry, this is an open source adaptation of a
-  real-world productive DataFlow application).
+  real-world productive Dataflow application).
 - applying State (as _idempotent_key_ in BagState) and Timer, avoiding duplicates with same _idempotent_key_ as long as
   the
   Timer is not flushed (acting as TTL).
@@ -107,10 +107,10 @@ This diagram represents the ingestion and processing flow of the BER notificatio
 HTTP endpoint through its state management within the S & T:
 ![mediation_design.png](../../../../../docs/mediation/mediation_design.png)
 
-1. Reading **historical_notifications** from Google Cloud Storage (GCS) as OPTION 1. OPTION 2, from PubSub, alternative
+1. Reading **historical_notifications** from Google Cloud Storage (GCS) as OPTION 1. OPTION 2, from Pubsub, alternative
    one (to be implemented)
 2. Ingestion and pre S & T Flow. Notifications (BERs) are Globally windowed and keyed by _idempotent_key_
-    - 2.1: Reading **new_notifications** from PubSub.
+    - 2.1: Reading **new_notifications** from Pubsub.
     - 2.2: Treating **historical_notifications**, _SideInput approach is taken_ (as long as TTL is applied) for
       discarding duplicates from **new_notifications** against **historical_notifications**.
     - 2.3: KO _inValidBers_ method as toxic notifications in GCS.
@@ -118,13 +118,13 @@ HTTP endpoint through its state management within the S & T:
 > NOTE 1: make sure you can fit in all **historical_notifications** from GCS as SideInput in your workers, allocating
 > enough memory
 
-> NOTE 2: A unionAll with Bounded "historical" (GCS) and Unbounded "fresh" (PubSub), has been discarded, as it stalls
+> NOTE 2: A unionAll with Bounded "historical" (GCS) and Unbounded "fresh" (Pubsub), has been discarded, as it stalls
 > the
 > process (only first
-> emitted Pane from PubSub is emitted) despite GroupByKey
+> emitted Pane from Pubsub is emitted) despite GroupByKey
 (GBK) when applying state (for State And Timer), and using GlobalWindow (other Triggers were included but only first
 > Pane Pubsub records were shown). As mentioned in point 1, potential OPTION 2, might be useful when reloading
-**historical_notifications** into PubSub and
+**historical_notifications** into Pubsub and
 > then loading them into the State and Timer, thus, all new notifications and historical will be wrapped seemingly as
 > "unbounded", applying S & T for **historical_notifications**.
 
@@ -137,7 +137,7 @@ HTTP endpoint through its state management within the S & T:
     - 4.3: flush() in _StateBaseAsyncDoFn.java_: Future [Http Response] is asynchronous and _StateBaseAsyncDoFn.java_
       will deal with it (outputting to main routine).
 5. Output HTTP Response is emitted in the main routine.
-6. Now you can save your HTTP Response/NOTIFICATION_RESPONSE along with the "sent" **new_notification** in PubSub (e.g:
+6. Now you can save your HTTP Response/NOTIFICATION_RESPONSE along with the "sent" **new_notification** in Pubsub (e.g:
    sinking in GCS eventually, useful for analytics as external table
    alongside the historical load as
    *historical_notifications* if mediation-service is restarted).
@@ -187,7 +187,7 @@ It must be stated, that SCIO provides some options to deal with similar "caching
 to: https://spotify.github.io/scio/releases/migrations/v0.8.0-Migration-Guide.html#async-dofns, as _BaseAsyncLookupDoFn_
 has a type parameter for some cache implementation, plugging in whatever cache supplier you want, e.g. a
 com.google.common.cache.Cache, having it for handling TTL. Although, a concern here would be the scalability, therefore,
-DataFlow Vertical autoscaling feature might come into place, tackling ingestion peaks.
+Dataflow Vertical autoscaling feature might come into place, tackling ingestion peaks.
 
 This SCIO caching capability along with a workaround for adding something similar to
 this [StateAsyncParDoWithHttpHandler](#StateAsyncParDoWithHttpHandler) using a S & T pattern, has been discussed as a
@@ -253,8 +253,8 @@ that we can avoid Dead Letter Queuing or Retry topic patterns. Retry is achieved
 
 > _HINT 1_: it uses the DirectRunner in your local machine (do not worry about not having a GCP project).
 
-> _HINT 2_: PubSub emulator in Java needs this
-> workaround https://cloud.google.com/pubsub/docs/emulator#pubsub-emulator-java. I have not got it sorted (yet). In the
+> _HINT 2_: Pubsub emulator in Java needs this
+> workaround https://cloud.google.com/Pubsub/docs/emulator#Pubsub-emulator-java. I have not got it sorted (yet). In the
 > meantime we can just get by with TestStream.
 
 ### StressTests
@@ -291,7 +291,7 @@ machine type):
 
 A similar application
 to https://github.com/albertols/scio-db/blob/cleanup-for-medium/src/main/scala/com.db.myproject/mediation/MediationService.scala
-has successfully been deployed on DataFlow in a real-world productive end to end pipeline and replaced:
+has successfully been deployed on Dataflow in a real-world productive end to end pipeline and replaced:
 - A Spring microservice (on Openshift) that was reading notifications from Kafka and sending them to a HTTP endpoint.
 - An entire multi-node Hazelcast cluster (on Openshift) that was acting as low latency IMDG storage later for
 historical/sent notifications.
