@@ -81,15 +81,24 @@ Memorystore), In Memory Data Grid (IMDG Hazelcast), etc… Each of them have dif
 this post), but the main drawback on the cloud is, I am sure you can guess: COST. Furthermore, if you need to deploy
 Regional or Multi-Regional instances this cost will proportionally increase.
 
-S & T might look like a good fit… let's get going 😎
+Just give me the keywords, please:
+
+- State?
+- Time To Live (Timer)?
+- Scalability?
+- High throughput?
+- Low latency look-ups?
+
+S & T pattern might look like a good fit then!… let's get going 😎
 
 
 ## Design
 
-- based on KV State & Timer (S & T) pattern: https://beam.apache.org/blog/timely-processing/
-- Why SCIO? https://cloud.google.com/blog/products/data-analytics/developing-beam-pipelines-using-scala
+- Based ona KV State & Timer (S & T) pattern: https://beam.apache.org/blog/timely-processing/
+  but, what about achieving Async parallelism?
+- SCIO? whyhttps://cloud.google.com/blog/products/data-analytics/developing-beam-pipelines-using-scala
   Leveraging https://spotify.github.io/scio/releases/migrations/v0.8.0Migration-Guide.html#async-dofns attaching a HTTPS
-  client for reaching an endpoint (e.g: https://jsonplaceholder.typicode.com/guide/) and sending _MyEventRecord_, also
+  client for reaching an endpoint (e.g: pointing to https://jsonplaceholder.typicode.com/guide/) and sending _MyEventRecord_, also
   known as _BusinessEventRecord_ (BER, if you come across this acronym, sorry, this is an open source adaptation of a
   real-world productive Dataflow application).
 - applying State (as _idempotent_key_ in BagState) and Timer, avoiding duplicates with same _idempotent_key_ as long as
@@ -106,6 +115,9 @@ S & T might look like a good fit… let's get going 😎
 ```
   def getIdempotentNotificationKey(record: MyEventRecord) = s"${record.getEvent.getTransactionId}-${record.getCustomer.getId}"
 ```
+
+Then, is there a way to keep the HTTP requests saved as S & T entries coming from a custom HTTP client? is this
+implemented? not really…but, let's get our hands dirty!
 
 ## Flow
 
