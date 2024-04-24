@@ -1,7 +1,8 @@
 # mediation-service
 
 - [Introduction](#Introduction)
-- [DataFlow_Assessment](#DataFlow_Assessment)
+- [Problem Statement](#ProblemStatement)
+- [Some data streaming challenges](#DataFlow_Assessment)
 - [Design](#Design)
 - [Modelling](#Modelling)
 - [Flow](#Flow)
@@ -39,6 +40,26 @@ Dataflow to undertake massive Async HTTP Requests? what about keeping the state 
 duplicates?
 Let's move on to the next section.
 
+## ProblemStatement
+
+Some of you may be familiar with mapWithState in
+SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html),
+keeping the state of elements among windows. Apache Beam has also a really cool and more powerful
+pattern https://beam.apache.org/blog/timely-processing/ called State and
+Timer (S & T) widely used in the industry and with some interesting underlying infrastructure when using the Dataflow
+runner. I would
+encourage you to go through some of the Beam Summit talks in the last section to figure it out.
+
+This looks like a good fit... but:
+
+- how would it be possible using a S & T through an Async ParDo? how would we attach a HTTP Client? how would it scale?
+- how can we achieve this using SCIO Scala for Apache Beam?
+- would this be cheaper than managing infrastructure, replicas, reloading historical notifications after a new node is
+  up or shutdown? which limitations are we facing with streaming, windowing and S & T when asynchronous HTTP calls are
+  involved?
+
+If you want to figure some of these questions out, you are in the right place.
+
 ## DataFlow_Assessment
 
 Duplicated data in the "distributed/BigData" world is a reality, especially if your pipeline is using Kafka at some
@@ -60,23 +81,8 @@ Memorystore), In Memory Data Grid (IMDG Hazelcast), etc… Each of them have dif
 this post), but the main drawback on the cloud is, I am sure you can guess: COST. Furthermore, if you need to deploy
 Regional or Multi-Regional instances this cost will proportionally increase.
 
-Some of you may be familiar with mapWithState in
-SparkStreaming (https://www.databricks.com/blog/2016/02/01/faster-stateful-stream-processing-in-apache-spark-streaming.html),
-keeping the state of elements among windows. Apache Beam has also a really cool and more powerful
-pattern https://beam.apache.org/blog/timely-processing/ called State and
-Timer (S & T) widely used in the industry and with some interesting underlying infrastructure when using the Dataflow
-runner. I would
-encourage you to go through some of the Beam Summit talks in the last section to figure it out.
+S & T might look like a good fit… let's get going 😎
 
-This looks like a good fit... but:
-
-- how would it be possible using a S & T through an Async ParDo? how would we attach a HTTP Client? how would it scale?
-- how can we achieve this using SCIO Scala for Apache Beam?
-- would this be cheaper than managing infrastructure, replicas, reloading historical notifications after a new node is
-  up or shutdown? which limitations are we facing with streaming, windowing and S & T when asynchronous HTTP calls are
-  involved?
-
-If you want to figure some of these questions out, you are in the right place.
 
 ## Design
 
