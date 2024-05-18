@@ -1,0 +1,30 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="MediationServiceSpec" type="ScalaTestRunConfiguration" factoryName="ScalaTest" nameIsGenerated="true" show_console_on_std_err="false" show_console_on_std_out="false">
+    <module name="scio-db" />
+    <option name="VMParameters" value="-Dlogback.configurationFile=src/main/resources/local_logback.xml" />
+    <option name="allowRunningInParallel" value="false" />
+    <option name="alternativeJrePath" />
+    <option name="alternativeJrePathEnabled" value="false" />
+    <option name="classpathModifications">
+      <list />
+    </option>
+    <option name="envs">
+      <map />
+    </option>
+    <option name="passParentEnvs" value="true" />
+    <option name="programParameters" value="" />
+    <option name="projectPathOnTarget" />
+    <option name="selectedOptions">
+      <list />
+    </option>
+    <option name="testKind" value="Class" />
+    <option name="workingDirectory" value="C:\Users\StratoSerna\IdeaProjects\scio-db" />
+    <option name="javaOptions" value="-Dlogback.configurationFile=src/main/resources/local_logback.xml" />
+    <option name="shortenClasspath" value="ARGS_FILE" />
+    <option name="testClassPath" value="mediation.MediationServiceSpec" />
+    <option name="workingDirectory" value="C:\Users\StratoSerna\IdeaProjects\scio-db" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
